@@ -1,0 +1,38 @@
+# ── Node / frontend ──────────────────────────────────────────
+node_modules/
+chhoti-don-react/node_modules/
+chhoti-don-react/dist/
+chhoti-don-react/.vite/
+.vite/
+*.tsbuildinfo
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Virtual environments ─────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Secrets / config ─────────────────────────────────────────
+.env
+.env.*
+*.local
+
+# ── Runtime / launcher artifacts ─────────────────────────────
+.runtime/
+logs/
+
+# ── Databases ────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── OS / editor noise ────────────────────────────────────────
+.DS_Store
+Thumbs.db

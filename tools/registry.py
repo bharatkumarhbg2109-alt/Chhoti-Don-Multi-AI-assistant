@@ -1,0 +1,231 @@
+"""Module Description"""
+
+from tools.calculator import run_calculator
+from tools.file_reader import read_file
+from tools.sandbox import run_python
+from tools.search import search_web
+
+# 🔎 Recon Imports
+from cyber_engine.recon.port_scanner import PortScanner
+from cyber_engine.recon.subdomain_scanner import SubdomainScanner
+
+# 💻 Coding Engine Imports
+from tools.code_generator import generate_code
+from tools.code_executor import execute_code
+from tools.code_debugger import debug_code, explain_code
+from typing import List, Optional
+
+# Nmap is optional
+try:
+    from cyber_engine.recon.nmap_wrapper import NmapWrapper
+    NMAP_IMPORT_AVAILABLE = True
+except Exception:
+    NMAP_IMPORT_AVAILABLE = False
+
+    """Class Description"""
+
+class ToolRegistry:
+    """Class Description"""
+
+    def __init__(self, brain=None):
+        """
+        Central registry for all executable tools.
+        Add new tools here only.
+
+        Args:
+            brain: Optional brain instance for AI-powered coding tools.
+        """
+
+        # Brain reference (used by coding tools)
+        self.brain = brain
+
+        # Always available tools
+        self.port_scanner = PortScanner()
+        self.subdomain_scanner = SubdomainScanner()
+
+        # Optional Nmap initialization
+        self.nmap = None
+        self.nmap_available = False
+
+        if NMAP_IMPORT_AVAILABLE:
+            try:
+                self.nmap = NmapWrapper()
+                self.nmap_available = True
+            except Exception:
+                self.nmap_available = False
+
+        # ------------------------------
+        # Core Tools (Preserved)
+        # ------------------------------
+        self.tools = {
+            "calculator": run_calculator,
+            "read_file": read_file,
+            "search": search_web,
+            "run_python": run_python,
+            "port_scan": self._run_port_scan,
+            "subdomain_scan": self._run_subdomain_scan,
+
+            # ---------------------------
+            # 💻 Coding Engine Tools
+            # ---------------------------
+            "generate_code": self._run_generate_code,
+            "execute_code": self._run_execute_code,
+            "debug_code": self._run_debug_code,
+            "explain_code": self._run_explain_code,
+        }
+
+        # Add Nmap only if available
+        if self.nmap_available:
+            self.tools["nmap_scan"] = self._run_nmap
+
+    # --------------------------------------------------
+    # 📋 List Tools (Preserved)
+    # --------------------------------------------------
+    def list_tools(self):
+        return list(self.tools.keys())
+
+    def get_available_tools(self):
+        return list(self.tools.keys())
+
+    # --------------------------------------------------
+    # 🚀 Execute Tool (Safe Version)
+    # --------------------------------------------------
+    def execute(self, tool_name, input_data):
+
+        if tool_name not in self.tools:
+            return {
+                "status": "error",
+                "tool": tool_name,
+                "message": f"Tool '{tool_name}' not found",
+                "available_tools": self.list_tools(),
+                "confidence": 0.0
+            }
+
+        try:
+            result = self.tools[tool_name](input_data)
+
+            return {
+                "status": "success",
+                "tool": tool_name,
+                "result": result,
+                "confidence": self._calculate_confidence(result)
+            }
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "tool": tool_name,
+                "message": str(e),
+                "confidence": 0.0
+            }
+
+    # ==================================================
+    # 🔎 RECON WRAPPERS (Preserved)
+    # ==================================================
+
+    def _run_nmap(self, input_data):
+        if not self.nmap_available:
+            return {
+                "status": "error",
+                "message": "Nmap is not available in this environment."
+            }
+
+        target = input_data.get("target")
+        scan_type = input_data.get("scan_type", "basic")
+        ports = input_data.get("ports")
+
+        if not target:
+            raise ValueError("Target is required for nmap_scan")
+
+        return self.nmap.run_scan(
+            target=target,
+            scan_type=scan_type,
+            ports=ports
+        )
+
+    def _run_port_scan(self, input_data):
+        target = input_data.get("target")
+        ports = input_data.get("ports")
+
+        if not target or not ports:
+            raise ValueError("Target and ports are required for port_scan")
+
+        return self.port_scanner.scan_ports(target, ports)
+
+    def _run_subdomain_scan(self, input_data):
+        domain = input_data.get("domain")
+
+        if not domain:
+            raise ValueError("Domain is required for subdomain_scan")
+
+        return self.subdomain_scanner.scan(domain)
+
+    # ==================================================
+    # 💻 CODING ENGINE WRAPPERS
+    # ==================================================
+
+    def _run_generate_code(self, input_data):
+        """
+        Generate code from natural language prompt.
+
+        input_data:
+            - prompt (str): What to build e.g. "ek calculator banao"
+            - language (str, optional): 'python', 'javascript', 'cpp', 'c', 'sql', 'bash'
+            - context (str, optional): Extra requirements
+        """
+        # Inject brain for AI-powered generation
+        input_data["brain"] = self.brain
+        return generate_code(input_data)
+
+    def _run_execute_code(self, input_data):
+        """
+        Execute code and return output.
+
+        input_data:
+            - code (str): Code to run
+            - language (str): Language of code
+            - stdin (str, optional): Input for the program
+        """
+        return execute_code(input_data)
+
+    def _run_debug_code(self, input_data):
+        """
+        Debug code — find bugs and suggest fixes.
+
+        input_data:
+            - code (str): Buggy code
+            - error (str): Error message/traceback
+            - language (str): Language
+        """
+        input_data["brain"] = self.brain
+        return debug_code(input_data)
+
+    def _run_explain_code(self, input_data):
+        """
+        Explain what code does in simple terms.
+
+        input_data:
+            - code (str): Code to explain
+            - language (str): Language
+            - detail_level (str): 'simple' or 'detailed'
+        """
+        input_data["brain"] = self.brain
+        return explain_code(input_data)
+
+    # ==================================================
+    # 📊 Confidence Engine (Preserved)
+    # ==================================================
+    def _calculate_confidence(self, result):
+
+        if isinstance(result, dict):
+
+            if result.get("status") == "error":
+                return 0.0
+
+            if "confidence_score" in result:
+                try:
+                    return float(result["confidence_score"]) / 100
+                except Exception:
+                    return 0.8
+
+        return 0.9

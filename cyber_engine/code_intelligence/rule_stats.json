@@ -1,0 +1,26 @@
+{
+    "missing-function-docstring": {
+        "success": 3.0326031501666706,
+        "failure": 19.866369400774026
+    },
+    "missing-class-docstring": {
+        "success": 7.102540092008444,
+        "failure": 10.58110898073505
+    },
+    "missing-module-docstring": {
+        "success": 3.809379898312867,
+        "failure": 5.073562657751624
+    },
+    "trailing-whitespace": {
+        "success": 5.610877705063582,
+        "failure": 2.4456621874999995
+    },
+    "missing-final-newline": {
+        "success": 65.42399748684402,
+        "failure": 8.641518833118438
+    },
+    "unused-import": {
+        "success": 168.03112706650512,
+        "failure": 106.70246218749998
+    }
+}

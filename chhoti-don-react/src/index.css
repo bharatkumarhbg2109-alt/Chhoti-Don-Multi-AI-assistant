@@ -1,0 +1,202 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: #050308;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+  background: #050308;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (pointer: fine) {
+  body,
+  button,
+  textarea,
+  a {
+    cursor: none;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply border border-white/10 bg-white/[0.035] shadow-glass backdrop-blur-2xl;
+    background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.044), rgba(244, 63, 94, 0.016) 48%, rgba(168, 85, 247, 0.018));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      inset 0 -1px 0 rgba(244, 63, 94, 0.025),
+      0 26px 95px rgba(0, 0, 0, 0.46);
+  }
+
+  .icon-button {
+    @apply grid h-9 w-9 place-items-center rounded-xl border border-transparent text-slate-400 transition duration-300 hover:scale-105 hover:border-rose-200/10 hover:bg-rose-300/[0.055] hover:text-rose-100;
+  }
+
+  .message-action {
+    @apply grid h-6 w-6 place-items-center rounded-lg text-slate-600 transition duration-200 hover:bg-rose-300/[0.055] hover:text-rose-200;
+  }
+
+  .cursor-core,
+  .cursor-trail-dot {
+    position: absolute;
+    left: 0;
+    top: 0;
+    border-radius: 9999px;
+    will-change: transform;
+  }
+
+  .cursor-core {
+    background: rgba(255, 228, 230, 0.96);
+    box-shadow:
+      0 0 15px rgba(253, 164, 175, 0.95),
+      0 0 38px rgba(217, 70, 239, 0.6);
+  }
+
+  .cursor-trail-dot {
+    border: 1px solid rgba(253, 164, 175, 0.3);
+    background: rgba(244, 63, 94, 0.08);
+    box-shadow: 0 0 17px rgba(217, 70, 239, 0.22);
+  }
+}
+
+.bg-grid {
+  background-image:
+    linear-gradient(rgba(251, 207, 232, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(251, 207, 232, 0.055) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.82), transparent 92%);
+}
+
+.noise-layer {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.45'/%3E%3C/svg%3E");
+}
+
+.orb-liquid {
+  animation: liquidOne 8s ease-in-out infinite alternate;
+  filter: saturate(1.16) contrast(1.03);
+}
+
+.orb-liquid-two {
+  animation: liquidTwo 9s ease-in-out infinite alternate;
+  filter: saturate(1.12);
+}
+
+@keyframes liquidOne {
+  0% {
+    transform: translate(-4%, -2%) rotate(0deg) scale(1);
+    border-radius: 42% 58% 55% 45% / 55% 38% 62% 45%;
+  }
+  50% {
+    transform: translate(12%, 10%) rotate(110deg) scale(1.1);
+    border-radius: 58% 42% 35% 65% / 42% 62% 38% 58%;
+  }
+  100% {
+    transform: translate(-2%, 18%) rotate(220deg) scale(0.96);
+    border-radius: 48% 52% 68% 32% / 64% 44% 56% 36%;
+  }
+}
+
+@keyframes liquidTwo {
+  0% {
+    transform: translate(3%, 2%) rotate(0deg) scale(1.04);
+  }
+  50% {
+    transform: translate(-14%, -12%) rotate(-120deg) scale(0.92);
+  }
+  100% {
+    transform: translate(7%, -18%) rotate(-240deg) scale(1.1);
+  }
+}
+
+.composer:focus-within + * {
+  opacity: 1;
+}
+
+.composer-glow {
+  background: linear-gradient(100deg, rgba(251, 113, 133, 0.58), rgba(217, 70, 239, 0.48), rgba(139, 92, 246, 0.4));
+}
+
+.composer:focus-within {
+  box-shadow:
+    0 0 0 1px rgba(253, 164, 175, 0.07),
+    0 18px 72px rgba(190, 24, 93, 0.13);
+}
+
+.composer-glow:has(+ .composer:focus-within) {
+  opacity: 0.52;
+}
+
+.scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(251, 113, 133, 0.17) transparent;
+}
+
+.scrollbar-subtle::-webkit-scrollbar {
+  width: 5px;
+}
+
+.scrollbar-subtle::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-subtle::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(251, 113, 133, 0.14);
+}
+
+.scrollbar-subtle::-webkit-scrollbar-thumb:hover {
+  background: rgba(232, 121, 249, 0.23);
+}
+
+@media (max-width: 640px) {
+  .bg-grid {
+    background-size: 34px 34px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* App-level reduce-motion override (Settings toggle) mirrors the media query. */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  scroll-behavior: auto !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
