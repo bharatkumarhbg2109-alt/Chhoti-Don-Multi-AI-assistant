@@ -1,145 +1,210 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  listConversations as apiList,
+  createConversation as apiCreate,
+  getConversation as apiGet,
+  patchConversation as apiPatch,
+  deleteConversation as apiDelete,
+  importConversations as apiImport,
+} from '../services/chatApi';
 
-const STORAGE_KEY = 'chhoti-don:conversations:v1';
-const ACTIVE_KEY = 'chhoti-don:activeConversation:v1';
-const DEFAULT_TITLE = 'New conversation';
+const LEGACY_KEY = 'chhoti-don:conversations:v1';
+const MIGRATED_KEY = 'chhoti-don:migrated:v2';
 
-const uid = () => `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+let seq = 0;
+const localId = () => `local_${Date.now().toString(36)}_${(seq += 1)}`;
 
-function makeConversation() {
-  const now = Date.now();
-  return { id: uid(), title: DEFAULT_TITLE, messages: [], createdAt: now, updatedAt: now };
-}
-
-function deriveTitle(text) {
-  const clean = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!clean) return DEFAULT_TITLE;
-  return clean.length > 42 ? `${clean.slice(0, 42)}…` : clean;
-}
-
-function loadInitial() {
+function fmtTime(created) {
+  if (!created) return 'Now';
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed) && parsed.length) {
-      const activeId = localStorage.getItem(ACTIVE_KEY);
-      const active = parsed.some((c) => c.id === activeId) ? activeId : parsed[0].id;
-      return { conversations: parsed, activeId: active };
-    }
+    return new Date(created * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   } catch {
-    /* corrupt storage → start fresh */
+    return 'Now';
   }
-  const fresh = makeConversation();
-  return { conversations: [fresh], activeId: fresh.id };
+}
+
+/** Map a backend message record to the frontend chat-message shape. */
+function toClientMessage(m) {
+  return {
+    id: m.id,
+    role: m.role,
+    text: m.content,
+    timestamp: fmtTime(m.created_at),
+    isError: m.status === 'error',
+    meta: {
+      model: m.model,
+      provider: m.provider,
+      ...(m.metadata || {}),
+    },
+  };
+}
+
+/** Normalise a backend conversation summary for the sidebar. */
+function toClientConversation(c) {
+  return {
+    ...c,
+    updatedAt: (c.updated_at || 0) * 1000,
+    messageCount: c.message_count || 0,
+  };
 }
 
 /**
- * Local, persisted conversation store.
- * - Conversations and the active id survive refresh via localStorage.
- * - `private mode` (paused) keeps everything in memory but stops writing to disk.
+ * Backend-backed conversation store.
+ *
+ * - The list, titles and messages live in the Flask/SQLite backend and survive
+ *   restart. Conversations are created lazily (on the first sent message) so the
+ *   sidebar never fills with empty drafts.
+ * - Private mode keeps the active draft entirely in volatile memory (nothing is
+ *   written to the backend).
+ * - A one-time migration imports any legacy localStorage history.
  */
 export default function useConversations() {
-  const initial = useMemo(loadInitial, []);
-  const [conversations, setConversations] = useState(initial.conversations);
-  const [activeId, setActiveId] = useState(initial.activeId);
-  const [paused, setPaused] = useState(false);
-  const privateSnapshotRef = useRef(null);
+  const [conversations, setConversations] = useState([]);
+  const [activeId, setActiveId] = useState(null); // null = unsaved draft
+  const [activeMessages, setActiveMessagesState] = useState([]);
+  const [privateMode, setPrivateModeState] = useState(false);
+  const [loadingList, setLoadingList] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [listError, setListError] = useState(null);
+  const [migrationInfo, setMigrationInfo] = useState(null);
 
   const activeIdRef = useRef(activeId);
   useEffect(() => {
     activeIdRef.current = activeId;
   }, [activeId]);
 
-  // Persist (unless private mode is on).
+  const refresh = useCallback(async (query) => {
+    setLoadingList(true);
+    try {
+      const data = await apiList(query);
+      const convs = (data?.conversations || []).map(toClientConversation);
+      setConversations(convs);
+      setListError(null);
+      return convs;
+    } catch (err) {
+      if (err?.name === 'AbortError') return [];
+      setListError(err?.message || 'Failed to load conversations.');
+      return [];
+    } finally {
+      setLoadingList(false);
+    }
+  }, []);
+
+  // One-time legacy migration, then initial load.
   useEffect(() => {
-    if (paused) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
-      localStorage.setItem(ACTIVE_KEY, activeId);
-    } catch {
-      /* storage full / unavailable → ignore, stay in-memory */
-    }
-  }, [conversations, activeId, paused]);
-
-  const updateActiveMessages = useCallback((updater) => {
-    setConversations((prev) =>
-      prev.map((c) => {
-        if (c.id !== activeIdRef.current) return c;
-        const messages = typeof updater === 'function' ? updater(c.messages) : updater;
-        let title = c.title;
-        if (title === DEFAULT_TITLE || !title) {
-          const firstUser = messages.find((m) => m.role === 'user');
-          if (firstUser) title = deriveTitle(firstUser.text);
+    let cancelled = false;
+    (async () => {
+      try {
+        const alreadyMigrated = localStorage.getItem(MIGRATED_KEY) === '1';
+        const raw = localStorage.getItem(LEGACY_KEY);
+        if (!alreadyMigrated && raw) {
+          const parsed = JSON.parse(raw);
+          const withMsgs = Array.isArray(parsed)
+            ? parsed.filter((c) => c && Array.isArray(c.messages) && c.messages.length)
+            : [];
+          if (withMsgs.length) {
+            const res = await apiImport(withMsgs);
+            if (!cancelled) setMigrationInfo(res);
+          }
+          localStorage.setItem(MIGRATED_KEY, '1');
         }
-        return { ...c, messages, title, updatedAt: Date.now() };
-      }),
-    );
+      } catch {
+        /* migration is best-effort; never blocks the app */
+      }
+      if (!cancelled) await refresh();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [refresh]);
+
+  const setActiveMessages = useCallback((updater) => {
+    setActiveMessagesState((prev) => (typeof updater === 'function' ? updater(prev) : updater));
   }, []);
 
-  const createConversation = useCallback(() => {
-    const fresh = makeConversation();
-    setConversations((prev) => {
-      // Drop other empty, unused conversations to avoid clutter.
-      const pruned = prev.filter((c) => c.messages.length > 0);
-      return [fresh, ...pruned];
-    });
-    setActiveId(fresh.id);
-    return fresh.id;
-  }, []);
-
-  const selectConversation = useCallback((id) => {
-    setActiveId((current) => (current === id ? current : id));
-  }, []);
-
-  const clearAllConversations = useCallback(() => {
-    const fresh = makeConversation();
-    setConversations([fresh]);
-    setActiveId(fresh.id);
+  const selectConversation = useCallback(async (id) => {
+    if (!id) return;
+    setActiveId(id);
+    setLoadingMessages(true);
     try {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem(ACTIVE_KEY);
+      const data = await apiGet(id);
+      const msgs = (data?.conversation?.messages || []).map(toClientMessage);
+      // Guard against a race if the user switched again mid-fetch.
+      if (activeIdRef.current === id) setActiveMessagesState(msgs);
     } catch {
-      /* ignore */
+      if (activeIdRef.current === id) setActiveMessagesState([]);
+    } finally {
+      setLoadingMessages(false);
     }
   }, []);
 
-  const setPrivateMode = useCallback((on) => {
-    const enabled = Boolean(on);
-    if (enabled) {
-      setConversations((current) => {
-        privateSnapshotRef.current = { conversations: current, activeId: activeIdRef.current };
-        return current;
-      });
-      setPaused(true);
-      return;
-    }
-
-    const snapshot = privateSnapshotRef.current;
-    if (snapshot) {
-      setConversations(snapshot.conversations);
-      setActiveId(snapshot.activeId);
-      privateSnapshotRef.current = null;
-    }
-    setPaused(false);
+  const newDraft = useCallback(() => {
+    setActiveId(null);
+    setActiveMessagesState([]);
   }, []);
 
-  const sorted = useMemo(
-    () => [...conversations].sort((a, b) => b.updatedAt - a.updatedAt),
-    [conversations],
+  /**
+   * Ensure a backend conversation exists for the active turn.
+   * Returns the conversation id, or null when in private mode (volatile).
+   */
+  const ensureConversationId = useCallback(async () => {
+    if (privateMode) return null;
+    if (activeIdRef.current) return activeIdRef.current;
+    const data = await apiCreate();
+    const conv = toClientConversation(data.conversation);
+    setConversations((prev) => [conv, ...prev]);
+    setActiveId(conv.id);
+    return conv.id;
+  }, [privateMode]);
+
+  const onTurnPersisted = useCallback(() => {
+    // Refresh summaries so titles/order/counts reflect the saved turn.
+    refresh();
+  }, [refresh]);
+
+  const renameConversation = useCallback(async (id, title) => {
+    const data = await apiPatch(id, { title });
+    const conv = toClientConversation(data.conversation);
+    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, ...conv } : c)));
+    return conv;
+  }, []);
+
+  const removeConversation = useCallback(
+    async (id) => {
+      await apiDelete(id);
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (activeIdRef.current === id) newDraft();
+    },
+    [newDraft],
   );
 
-  const activeConversation =
-    conversations.find((c) => c.id === activeId) || conversations[0] || makeConversation();
+  const setPrivateMode = useCallback(
+    (on) => {
+      const enabled = Boolean(on);
+      setPrivateModeState(enabled);
+      // Entering private mode starts a clean volatile draft.
+      if (enabled) newDraft();
+    },
+    [newDraft],
+  );
 
   return {
-    conversations: sorted,
-    activeConversation,
+    conversations,
     activeId,
-    privateMode: paused,
+    activeMessages,
+    privateMode,
+    loadingList,
+    loadingMessages,
+    listError,
+    migrationInfo,
+    setActiveMessages,
     setPrivateMode,
-    createConversation,
+    refresh,
     selectConversation,
-    updateActiveMessages,
-    clearAllConversations,
+    newDraft,
+    ensureConversationId,
+    onTurnPersisted,
+    renameConversation,
+    removeConversation,
   };
 }

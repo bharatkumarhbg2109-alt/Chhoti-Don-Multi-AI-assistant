@@ -1,27 +1,32 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Icon from './Icon';
-import { getMemory } from '../services/chatApi';
+import { getMemory, searchMemory } from '../services/chatApi';
 
 /**
- * Backend conversation memory viewer (GET /api/memory).
- * Handles loading, success, empty, and error states with a manual refresh.
+ * Backend conversation memory viewer (GET /api/memory + POST /api/memory/search).
+ * Handles loading, success, empty, and error states with manual refresh, search
+ * and a confirmed clear action.
  */
-export default function MemoryView() {
+export default function MemoryView({ onClearMemory }) {
   const [state, setState] = useState('loading'); // loading | ready | empty | error
   const [entries, setEntries] = useState([]);
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
   const abortRef = useRef(null);
 
-  const load = useCallback(() => {
+  const load = useCallback((q = '') => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     setState('loading');
     setError('');
 
-    getMemory(controller.signal)
-      .then((data) => {
-        const memory = Array.isArray(data?.memory) ? data.memory : [];
+    const req = q.trim()
+      ? searchMemory(q.trim(), controller.signal).then((d) => d?.matches || [])
+      : getMemory(controller.signal).then((d) => (Array.isArray(d?.memory) ? d.memory : []));
+
+    req
+      .then((memory) => {
         setEntries(memory);
         setState(memory.length ? 'ready' : 'empty');
       })
@@ -37,6 +42,11 @@ export default function MemoryView() {
     return () => abortRef.current?.abort();
   }, [load]);
 
+  const onSearchSubmit = (e) => {
+    e.preventDefault();
+    load(query);
+  };
+
   return (
     <div className="mx-auto max-w-3xl">
       <div className="mb-5 flex items-center justify-between">
@@ -49,16 +59,50 @@ export default function MemoryView() {
             <p className="text-[11px] text-slate-500">Recent context held by the backend engine</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={load}
-          disabled={state === 'loading'}
-          className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300 transition hover:border-rose-300/20 hover:bg-rose-300/[0.055] hover:text-rose-100 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
-        >
-          <Icon name="history" className={`h-4 w-4 ${state === 'loading' ? 'animate-orb-spin' : ''}`} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setQuery('');
+              load();
+            }}
+            disabled={state === 'loading'}
+            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300 transition hover:border-rose-300/20 hover:bg-rose-300/[0.055] hover:text-rose-100 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+          >
+            <Icon name="refresh" className={`h-4 w-4 ${state === 'loading' ? 'animate-orb-spin' : ''}`} />
+            Refresh
+          </button>
+          {onClearMemory && (
+            <button
+              type="button"
+              onClick={onClearMemory}
+              className="flex items-center gap-2 rounded-xl border border-amber-400/25 bg-amber-500/[0.08] px-3 py-2 text-xs text-amber-100 transition hover:bg-amber-300/[0.14] focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300/40"
+            >
+              <Icon name="trash" className="h-4 w-4" />
+              Clear
+            </button>
+          )}
+        </div>
       </div>
+
+      <form onSubmit={onSearchSubmit} className="mb-4 flex items-center gap-2">
+        <div className="flex flex-1 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2">
+          <Icon name="search" className="h-4 w-4 text-slate-500" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search memory…"
+            className="flex-1 bg-transparent text-xs text-slate-200 outline-none placeholder:text-slate-600"
+            aria-label="Search memory"
+          />
+        </div>
+        <button
+          type="submit"
+          className="rounded-xl border border-rose-300/20 bg-rose-400/10 px-3 py-2 text-xs text-rose-100 transition hover:bg-rose-400/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+        >
+          Search
+        </button>
+      </form>
 
       {state === 'loading' && (
         <div className="space-y-3" aria-busy="true">
@@ -74,7 +118,7 @@ export default function MemoryView() {
           <p className="mt-2 text-sm text-amber-100">{error}</p>
           <button
             type="button"
-            onClick={load}
+            onClick={() => load(query)}
             className="mt-3 rounded-xl border border-amber-400/30 px-3 py-1.5 text-xs text-amber-100 transition hover:bg-amber-300/[0.12]"
           >
             Try again
@@ -85,7 +129,7 @@ export default function MemoryView() {
       {state === 'empty' && (
         <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-8 text-center">
           <Icon name="brain" className="mx-auto h-7 w-7 text-slate-600" />
-          <p className="mt-3 text-sm text-slate-400">No memory yet.</p>
+          <p className="mt-3 text-sm text-slate-400">{query.trim() ? 'No matching memory.' : 'No memory yet.'}</p>
           <p className="mt-1 text-xs text-slate-600">Start a conversation and the engine's recent context appears here.</p>
         </div>
       )}

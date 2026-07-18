@@ -13,7 +13,7 @@ import json
 from typing import Dict, List, Optional, Tuple, Tuple
 
 
-class SessionManager, Type:
+class SessionManager:
     """
     Advanced Session Manager
     - Adaptive rate limiting

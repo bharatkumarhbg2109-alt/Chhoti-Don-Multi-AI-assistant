@@ -7,6 +7,12 @@ const primaryNav = [
   { view: 'memory', icon: 'brain', label: 'Memory' },
 ];
 
+const systemNav = [
+  { view: 'system', icon: 'cpu', label: 'System Status' },
+  { view: 'cyber', icon: 'shield', label: 'Cyber Engine' },
+  { view: 'healing', icon: 'pulse', label: 'Self-Healing' },
+];
+
 function relativeTime(ts) {
   if (!ts) return '';
   const diff = Date.now() - ts;
@@ -29,13 +35,16 @@ export default function Sidebar({
   onSelectConversation,
   onNewConversation,
   onOpenSettings,
-  onClearHistory,
+  onSearch,
+  onRenameConversation,
+  onDeleteConversation,
 }) {
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const searchRef = useRef(null);
   const menuRef = useRef(null);
+  const debounceRef = useRef(null);
 
   useEffect(() => {
     if (searchOpen) searchRef.current?.focus();
@@ -50,9 +59,33 @@ export default function Sidebar({
     return () => window.removeEventListener('mousedown', onDown);
   }, [menuOpen]);
 
-  const filtered = search.trim()
-    ? conversations.filter((c) => c.title.toLowerCase().includes(search.trim().toLowerCase()))
-    : conversations;
+  const handleSearchChange = (value) => {
+    setSearch(value);
+    if (!onSearch) return;
+    window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => onSearch(value.trim()), 300);
+  };
+
+  const navButton = (item) => {
+    const active = currentView === item.view;
+    return (
+      <button
+        type="button"
+        key={item.view}
+        onClick={() => onSelectView(item.view)}
+        aria-current={active ? 'page' : undefined}
+        className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition duration-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40 ${
+          active
+            ? 'border border-rose-200/10 bg-gradient-to-r from-rose-400/[0.09] to-fuchsia-500/[0.045] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.05)]'
+            : 'border border-transparent text-slate-400 hover:border-white/5 hover:bg-white/[0.035] hover:text-slate-100'
+        }`}
+      >
+        <Icon name={item.icon} className={`h-[18px] w-[18px] ${active ? 'text-rose-300' : 'group-hover:text-rose-300'}`} />
+        <span>{item.label}</span>
+        {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-rose-300 shadow-[0_0_12px_rgba(253,164,175,.95)]" />}
+      </button>
+    );
+  };
 
   return (
     <>
@@ -97,33 +130,26 @@ export default function Sidebar({
         </button>
 
         <nav className="mt-5 space-y-1" aria-label="Primary navigation">
-          {primaryNav.map((item) => {
-            const active = currentView === item.view;
-            return (
-              <button
-                type="button"
-                key={item.view}
-                onClick={() => onSelectView(item.view)}
-                aria-current={active ? 'page' : undefined}
-                className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition duration-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40 ${
-                  active
-                    ? 'border border-rose-200/10 bg-gradient-to-r from-rose-400/[0.09] to-fuchsia-500/[0.045] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.05)]'
-                    : 'border border-transparent text-slate-400 hover:border-white/5 hover:bg-white/[0.035] hover:text-slate-100'
-                }`}
-              >
-                <Icon name={item.icon} className={`h-[18px] w-[18px] ${active ? 'text-rose-300' : 'group-hover:text-rose-300'}`} />
-                <span>{item.label}</span>
-                {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-rose-300 shadow-[0_0_12px_rgba(253,164,175,.95)]" />}
-              </button>
-            );
-          })}
+          {primaryNav.map(navButton)}
+        </nav>
+
+        <p className="mt-5 px-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">System</p>
+        <nav className="mt-1 space-y-1" aria-label="System navigation">
+          {systemNav.map(navButton)}
         </nav>
 
         <div className="mt-6 flex items-center justify-between px-2">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Recent</p>
           <button
             type="button"
-            onClick={() => setSearchOpen((v) => !v)}
+            onClick={() => {
+              const next = !searchOpen;
+              setSearchOpen(next);
+              if (!next) {
+                setSearch('');
+                onSearch?.('');
+              }
+            }}
             className="text-slate-500 transition hover:text-rose-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
             aria-label={searchOpen ? 'Hide conversation search' : 'Search conversations'}
             aria-expanded={searchOpen}
@@ -137,8 +163,8 @@ export default function Sidebar({
             <input
               ref={searchRef}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search conversations…"
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="Search title or message…"
               className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-rose-300/30"
               aria-label="Search conversations"
             />
@@ -146,42 +172,65 @@ export default function Sidebar({
         )}
 
         <div className="scrollbar-subtle mt-2 flex-1 space-y-1 overflow-y-auto pr-1">
-          {filtered.length === 0 && (
+          {conversations.length === 0 && (
             <p className="px-3 py-6 text-center text-[11px] text-slate-600">
               {search.trim() ? 'No matches.' : 'No conversations yet.'}
             </p>
           )}
-          {filtered.map((conversation) => {
+          {conversations.map((conversation) => {
             const active = conversation.id === activeConversationId;
+            const count = conversation.messageCount ?? conversation.messages?.length ?? 0;
             return (
-              <button
-                type="button"
+              <div
                 key={conversation.id}
-                onClick={() => onSelectConversation(conversation.id)}
-                aria-current={active ? 'true' : undefined}
-                className={`group flex w-full items-center gap-3 rounded-2xl border px-3 py-2.5 text-left transition duration-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40 ${
+                className={`group flex items-center gap-2 rounded-2xl border pr-1.5 transition duration-300 ${
                   active
                     ? 'border-rose-200/15 bg-rose-300/[0.06]'
                     : 'border-transparent hover:border-rose-200/[0.07] hover:bg-rose-300/[0.035]'
                 }`}
               >
-                <span
-                  className={`h-8 w-1 rounded-full ${
-                    active
-                      ? 'bg-gradient-to-b from-rose-300 via-fuchsia-400 to-violet-500'
-                      : 'bg-white/5 group-hover:bg-white/10'
-                  }`}
-                />
-                <span className="min-w-0 flex-1">
-                  <span className={`block truncate text-xs font-medium ${active ? 'text-white' : 'text-slate-300 group-hover:text-white'}`}>
-                    {conversation.title}
+                <button
+                  type="button"
+                  onClick={() => onSelectConversation(conversation.id)}
+                  aria-current={active ? 'true' : undefined}
+                  className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-3 py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+                >
+                  <span
+                    className={`h-8 w-1 rounded-full ${
+                      active
+                        ? 'bg-gradient-to-b from-rose-300 via-fuchsia-400 to-violet-500'
+                        : 'bg-white/5 group-hover:bg-white/10'
+                    }`}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate text-xs font-medium ${active ? 'text-white' : 'text-slate-300 group-hover:text-white'}`}>
+                      {conversation.title}
+                    </span>
+                    <span className="mt-1 block text-[10px] text-slate-600">
+                      {count} message{count === 1 ? '' : 's'}
+                    </span>
                   </span>
-                  <span className="mt-1 block text-[10px] text-slate-600">
-                    {conversation.messages.length} message{conversation.messages.length === 1 ? '' : 's'}
-                  </span>
-                </span>
-                <span className="text-[10px] text-slate-600">{relativeTime(conversation.updatedAt)}</span>
-              </button>
+                  <span className="text-[10px] text-slate-600">{relativeTime(conversation.updatedAt)}</span>
+                </button>
+                <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+                  <button
+                    type="button"
+                    onClick={() => onRenameConversation?.(conversation.id)}
+                    className="grid h-7 w-7 place-items-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-rose-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+                    aria-label={`Rename ${conversation.title}`}
+                  >
+                    <Icon name="edit" className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDeleteConversation?.(conversation.id)}
+                    className="grid h-7 w-7 place-items-center rounded-lg text-slate-500 transition hover:bg-amber-300/[0.12] hover:text-amber-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300/40"
+                    aria-label={`Delete ${conversation.title}`}
+                  >
+                    <Icon name="trash" className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -230,12 +279,12 @@ export default function Sidebar({
                 role="menuitem"
                 onClick={() => {
                   setMenuOpen(false);
-                  onClearHistory();
+                  onSelectView('system');
                 }}
-                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs text-amber-200 transition hover:bg-amber-300/[0.1]"
+                className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs text-slate-300 transition hover:bg-white/[0.05] hover:text-white"
               >
-                <Icon name="logout" className="h-4 w-4" />
-                Clear history
+                <Icon name="cpu" className="h-4 w-4" />
+                System status
               </button>
             </div>
           )}

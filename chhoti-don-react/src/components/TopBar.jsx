@@ -6,6 +6,9 @@ const VIEW_META = {
   assistant: { title: 'CHHOTI DON Assistant', subtitle: 'Personal, context-aware, and ready to help' },
   workspace: { title: 'Workspace', subtitle: 'Project & file integration — planned' },
   memory: { title: 'Memory', subtitle: 'Recent context held by the engine' },
+  system: { title: 'System Status', subtitle: 'Desktop shell, backend, Ollama, model & database' },
+  cyber: { title: 'Cyber Engine', subtitle: 'Read-only defensive posture & safety policy' },
+  healing: { title: 'Self-Healing', subtitle: 'Read-only code intelligence & project health' },
 };
 
 export default function TopBar({
@@ -13,6 +16,7 @@ export default function TopBar({
   currentView = 'assistant',
   aiStatus,
   privateMode,
+  desktop = false,
   onTogglePrivate,
   onOpenSettings,
   onThemeClick,
@@ -42,6 +46,15 @@ export default function TopBar({
       </div>
 
       <div className="flex items-center gap-2">
+        {desktop && (
+          <span
+            className="hidden items-center gap-1.5 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200 md:inline-flex"
+            title="Running inside the CHHOTI DON desktop app"
+          >
+            <Icon name="desktop" className="h-3.5 w-3.5" />
+            Desktop
+          </span>
+        )}
         <button
           type="button"
           onClick={onTogglePrivate}

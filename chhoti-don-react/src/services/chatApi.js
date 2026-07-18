@@ -1,13 +1,30 @@
 /**
  * Chat API Service — connects the React dashboard to the Chhoti Don Flask backend.
- * All requests go through the Vite dev-server proxy (/api → http://127.0.0.1:8000).
+ *
+ * Origin handling:
+ *   - Vite dev server proxies /api → http://127.0.0.1:8000.
+ *   - The packaged desktop shell loads the app same-origin FROM the backend
+ *     (http://127.0.0.1:8000), so relative /api also works there.
+ *   - An explicit VITE_API_BASE_URL or window.__CHHOTI_DON_API_BASE overrides both.
  */
 
-const configuredBase = String(import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
-const API_BASE = configuredBase.endsWith('/api') ? configuredBase : `${configuredBase}/api`;
+function resolveBase() {
+  if (typeof window !== 'undefined' && window.__CHHOTI_DON_API_BASE) {
+    return String(window.__CHHOTI_DON_API_BASE).replace(/\/$/, '');
+  }
+  const configured = String(import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+  return configured.endsWith('/api') ? configured : `${configured}/api`;
+}
 
-const CHAT_TIMEOUT = 60000; // ms
+const API_BASE = resolveBase();
+
+const CHAT_TIMEOUT = 120000; // ms
 const QUICK_TIMEOUT = 8000; // ms (health/status/memory)
+const ACTION_TIMEOUT = 30000; // ms (analyze, safe-action)
+
+/** True when running inside the Electron desktop shell (preload bridge present). */
+export const isDesktop = () =>
+  typeof window !== 'undefined' && Boolean(window.chhotiDon?.isDesktop);
 
 /**
  * Typed API error so the UI can distinguish failure kinds.
@@ -22,15 +39,9 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Combine an optional external AbortSignal with a timeout into one signal.
- * Returns the merged signal, a cleanup fn, and a flag object recording whether
- * the timeout (not the caller) fired.
- */
 function withTimeout(externalSignal, timeoutMs) {
   const controller = new AbortController();
   const state = { timedOut: false };
-
   const timer = window.setTimeout(() => {
     state.timedOut = true;
     controller.abort();
@@ -41,20 +52,13 @@ function withTimeout(externalSignal, timeoutMs) {
     if (externalSignal.aborted) controller.abort();
     else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
   }
-
   const cleanup = () => {
     window.clearTimeout(timer);
     externalSignal?.removeEventListener('abort', onExternalAbort);
   };
-
   return { signal: controller.signal, state, cleanup };
 }
 
-/**
- * Perform a fetch with timeout + typed error classification.
- * Throws AbortError (name preserved) when the CALLER aborts, so callers can
- * silently ignore cancellations (e.g. switching conversations).
- */
 async function request(path, { method = 'GET', body, signal, timeout = QUICK_TIMEOUT } = {}) {
   const { signal: merged, state, cleanup } = withTimeout(signal, timeout);
 
@@ -68,7 +72,6 @@ async function request(path, { method = 'GET', body, signal, timeout = QUICK_TIM
     });
   } catch (err) {
     cleanup();
-    // Caller-initiated cancellation → re-throw as AbortError (name preserved).
     if (err?.name === 'AbortError' && !state.timedOut) {
       const abortErr = new Error('Request aborted');
       abortErr.name = 'AbortError';
@@ -91,8 +94,11 @@ async function request(path, { method = 'GET', body, signal, timeout = QUICK_TIM
   }
 
   if (!res.ok) {
-    const msg = (data && (data.response || data.error)) || `Server error ${res.status}`;
-    throw new ApiError(msg, res.status >= 500 ? 'server' : 'http', res.status);
+    const msg = (data && (data.response || data.message || data.error)) || `Server error ${res.status}`;
+    // Attach the parsed payload so callers can read structured "blocked" responses.
+    const apiErr = new ApiError(msg, res.status >= 500 ? 'server' : 'http', res.status);
+    apiErr.payload = data;
+    throw apiErr;
   }
   if (parseFailed) {
     throw new ApiError('Received an invalid response from the server.', 'parse', res.status);
@@ -100,32 +106,64 @@ async function request(path, { method = 'GET', body, signal, timeout = QUICK_TIM
   return data;
 }
 
+// ── Chat ──────────────────────────────────────────────────────
 /**
  * Send a chat message to the backend.
- * @param {string} message  - The user's message text.
- * @param {string} [tool]   - Optional tool hint (e.g. "coder", "recon", "chat").
- * @param {AbortSignal} [signal] - Optional abort signal to cancel the request.
+ * @param {string} message
+ * @param {object} [opts] - { tool, conversationId, isPrivate, persistUser, signal }
  */
-export function sendMessage(message, tool = 'chat', signal) {
-  return request('/chat', { method: 'POST', body: { message, tool }, signal, timeout: CHAT_TIMEOUT });
+export function sendMessage(message, opts = {}) {
+  const { tool = 'chat', conversationId, isPrivate = false, persistUser = true, signal } = opts;
+  return request('/chat', {
+    method: 'POST',
+    body: {
+      message,
+      tool,
+      conversation_id: conversationId || null,
+      private: isPrivate,
+      persist_user: persistUser,
+    },
+    signal,
+    timeout: CHAT_TIMEOUT,
+  });
 }
 
-/** Lightweight health check. */
-export function checkHealth(signal) {
-  return request('/health', { signal });
-}
+// ── Health / status / capabilities ────────────────────────────
+export const checkHealth = (signal) => request('/health', { signal });
+export const getStatus = (signal) => request('/status', { signal });
+export const getCapabilities = (signal) => request('/capabilities', { signal });
 
-/** Extended status: provider mode, model availability, simulated fallback. */
-export function getStatus(signal) {
-  return request('/status', { signal });
-}
+// ── Memory ────────────────────────────────────────────────────
+export const getMemory = (signal) => request('/memory', { signal });
+export const searchMemory = (query, signal) =>
+  request('/memory/search', { method: 'POST', body: { query }, signal });
+export const resetMemory = (signal) => request('/reset', { method: 'POST', signal });
 
-/** Conversation memory stored on the backend. */
-export function getMemory(signal) {
-  return request('/memory', { signal });
-}
+// ── Conversations (persistent history) ────────────────────────
+export const listConversations = (query, signal) =>
+  request(`/conversations${query ? `?q=${encodeURIComponent(query)}` : ''}`, { signal });
+export const createConversation = (title, isPrivate = false, signal) =>
+  request('/conversations', { method: 'POST', body: { title, private: isPrivate }, signal });
+export const getConversation = (id, signal) =>
+  request(`/conversations/${encodeURIComponent(id)}`, { signal });
+export const patchConversation = (id, patch, signal) =>
+  request(`/conversations/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch, signal });
+export const deleteConversation = (id, signal) =>
+  request(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE', signal });
+export const importConversations = (conversations, signal) =>
+  request('/conversations/import', { method: 'POST', body: { conversations }, signal });
 
-/** Clear conversation memory on the backend. */
-export function resetMemory(signal) {
-  return request('/reset', { method: 'POST', signal });
-}
+// ── Cyber Engine (safe, defensive) ────────────────────────────
+export const getCyberStatus = (signal) => request('/cyber/status', { signal });
+export const getCyberCapabilities = (signal) => request('/cyber/capabilities', { signal });
+export const runCyberSafeAction = (action, confirm, signal) =>
+  request('/cyber/run-safe-action', { method: 'POST', body: { action, confirm }, signal, timeout: ACTION_TIMEOUT });
+
+// ── Self-Healing / Code Intelligence ──────────────────────────
+export const getHealingStatus = (signal) => request('/self-healing/status', { signal });
+export const runHealingAnalyze = (signal) =>
+  request('/self-healing/analyze', { method: 'POST', body: {}, signal, timeout: ACTION_TIMEOUT });
+export const getHealingReports = (signal) => request('/self-healing/reports', { signal });
+
+// ── Logs ──────────────────────────────────────────────────────
+export const getLog = (name, signal) => request(`/logs/${encodeURIComponent(name)}`, { signal });

@@ -5,6 +5,9 @@ import ChatMessage from './components/ChatMessage';
 import CursorTrail from './components/CursorTrail';
 import EmptyState from './components/EmptyState';
 import MemoryView from './components/MemoryView';
+import SystemStatusView from './components/SystemStatusView';
+import CyberView from './components/CyberView';
+import HealingView from './components/HealingView';
 import SettingsModal from './components/SettingsModal';
 import Sidebar from './components/Sidebar';
 import ThinkingIndicator from './components/ThinkingIndicator';
@@ -12,7 +15,7 @@ import TopBar from './components/TopBar';
 import WorkspaceView from './components/WorkspaceView';
 import useConversations from './hooks/useConversations';
 import { useToast } from './context/ToastContext';
-import { getStatus, sendMessage } from './services/chatApi';
+import { getStatus, sendMessage, resetMemory, isDesktop } from './services/chatApi';
 import { deriveAiStatus } from './services/status';
 
 const promptIdeas = [
@@ -36,14 +39,20 @@ const nextId = () => `${Date.now().toString(36)}_${(messageSeq += 1)}`;
 function App() {
   const {
     conversations,
-    activeConversation,
     activeId,
+    activeMessages,
     privateMode,
+    loadingMessages,
+    migrationInfo,
+    setActiveMessages,
     setPrivateMode,
-    createConversation,
+    refresh,
     selectConversation,
-    updateActiveMessages,
-    clearAllConversations,
+    newDraft,
+    ensureConversationId,
+    onTurnPersisted,
+    renameConversation,
+    removeConversation,
   } = useConversations();
   const { notify } = useToast();
 
@@ -52,7 +61,7 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [message, setMessage] = useState('');
   const [thinking, setThinking] = useState(false);
-  const [streamingMsg, setStreamingMsg] = useState(null); // transient assistant message being typed
+  const [streamingMsg, setStreamingMsg] = useState(null);
   const [backendOnline, setBackendOnline] = useState(null);
   const [status, setStatus] = useState(null);
   const [reduceMotion, setReduceMotion] = useState(() => {
@@ -69,11 +78,10 @@ function App() {
   const abortRef = useRef(null);
   const streamTimerRef = useRef(null);
 
-  const messages = activeConversation?.messages ?? [];
+  const messages = activeMessages;
   const aiStatus = deriveAiStatus(status, backendOnline);
   const busy = thinking || Boolean(streamingMsg);
 
-  // Apply reduce-motion preference to the document + persist it.
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle('reduce-motion', reduceMotion);
@@ -83,6 +91,13 @@ function App() {
       /* ignore */
     }
   }, [reduceMotion]);
+
+  useEffect(() => {
+    if (migrationInfo?.imported) {
+      notify(`Imported ${migrationInfo.imported} saved conversation${migrationInfo.imported === 1 ? '' : 's'}.`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [migrationInfo]);
 
   const loadStatus = useCallback((signal) => {
     return getStatus(signal)
@@ -98,14 +113,12 @@ function App() {
       });
   }, []);
 
-  // One-shot status check on mount (no aggressive polling).
   useEffect(() => {
     const controller = new AbortController();
     loadStatus(controller.signal);
     return () => controller.abort();
   }, [loadStatus]);
 
-  // Cancel any in-flight request / typewriter on unmount.
   useEffect(
     () => () => {
       abortRef.current?.abort();
@@ -114,7 +127,6 @@ function App() {
     [],
   );
 
-  // Switching conversations cancels the active turn (aborts are not failures).
   const cancelActiveTurn = useCallback(() => {
     abortRef.current?.abort();
     window.clearTimeout(streamTimerRef.current);
@@ -125,7 +137,6 @@ function App() {
   }, []);
 
   useEffect(() => {
-    // When the active conversation changes, stop anything in progress.
     cancelActiveTurn();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
@@ -147,12 +158,13 @@ function App() {
       intent: data?.intent,
       taskType: data?.task_type,
       executionTime: data?.execution_time,
+      provider: data?.provider,
+      model: data?.model,
     };
-    const msgId = nextId();
+    const msgId = data?.message_id || nextId();
 
     const commit = (text) => {
-      // Commit the finished assistant message and clear the transient in one batch.
-      updateActiveMessages((current) => [
+      setActiveMessages((current) => [
         ...current,
         { id: msgId, role: 'assistant', text, timestamp: 'Now', meta },
       ]);
@@ -180,7 +192,7 @@ function App() {
     streamTimerRef.current = window.setTimeout(step, STREAM_DELAY);
   };
 
-  const runAssistant = async (userText, wasOffline) => {
+  const runAssistant = async (userText, wasOffline, persistUser) => {
     if (!userText) return;
     inFlightRef.current = true;
     setThinking(true);
@@ -189,16 +201,21 @@ function App() {
     abortRef.current = controller;
 
     try {
-      const data = await sendMessage(userText, 'chat', controller.signal);
-      // Success: clear any stale error bubbles + mark backend online.
-      updateActiveMessages((current) => current.filter((m) => !m.isError));
+      const convId = await ensureConversationId();
+      const data = await sendMessage(userText, {
+        conversationId: convId,
+        isPrivate: privateMode,
+        persistUser,
+        signal: controller.signal,
+      });
+      setActiveMessages((current) => current.filter((m) => !m.isError));
       setBackendOnline(true);
       setThinking(false);
       streamAssistant(data);
-      if (wasOffline) loadStatus(); // refresh provider status after recovery
+      if (!privateMode) onTurnPersisted();
+      if (wasOffline) loadStatus();
     } catch (err) {
       if (err?.name === 'AbortError') {
-        // Cancelled (e.g. conversation switch) — not a failure.
         setThinking(false);
         inFlightRef.current = false;
         return;
@@ -213,7 +230,7 @@ function App() {
         ? `Can't reach CHHOTI DON. ${err.message}`
         : `Something went wrong: ${err.message}`;
 
-      updateActiveMessages((current) => [
+      setActiveMessages((current) => [
         ...current,
         { id: nextId(), role: 'assistant', text, timestamp: 'Now', isError: true, kind: err?.kind || 'error' },
       ]);
@@ -222,16 +239,15 @@ function App() {
 
   const submitMessage = (preset) => {
     const content = (preset ?? message).trim();
-    if (!content || inFlightRef.current) return; // duplicate-submit prevention
+    if (!content || inFlightRef.current) return;
 
     const wasOffline = backendOnline === false;
-    // Add the user message and drop any prior error bubbles for a clean turn.
-    updateActiveMessages((current) => [
+    setActiveMessages((current) => [
       ...current.filter((m) => !m.isError),
       { id: nextId(), role: 'user', text: content, timestamp: 'Now' },
     ]);
     setMessage('');
-    runAssistant(content, wasOffline);
+    runAssistant(content, wasOffline, true);
   };
 
   const handleRetry = () => {
@@ -239,19 +255,26 @@ function App() {
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (!lastUser) return;
     const wasOffline = backendOnline === false;
-    updateActiveMessages((current) => current.filter((m) => !m.isError));
-    runAssistant(lastUser.text, wasOffline);
+    setActiveMessages((current) => current.filter((m) => !m.isError));
+    // persistUser=false so the retry does not duplicate the user message.
+    runAssistant(lastUser.text, wasOffline, false);
+  };
+
+  const handleStop = () => {
+    cancelActiveTurn();
+    notify('Generation stopped.');
+    composerRef.current?.focus?.();
   };
 
   const handleDismiss = (id) => {
-    updateActiveMessages((current) => current.filter((m) => m.id !== id));
+    setActiveMessages((current) => current.filter((m) => m.id !== id));
   };
 
   const handleNewConversation = () => {
     cancelActiveTurn();
     setMessage('');
     setView('assistant');
-    createConversation();
+    newDraft();
     setSidebarOpen(false);
     requestAnimationFrame(() => composerRef.current?.focus?.());
   };
@@ -272,13 +295,42 @@ function App() {
     composerRef.current?.focus?.();
   };
 
-  const handleClearHistory = () => {
-    if (!window.confirm('Clear all locally saved CHHOTI DON conversations? This cannot be undone.')) return;
-    cancelActiveTurn();
-    clearAllConversations();
+  const handleRename = async (id) => {
+    const current = conversations.find((c) => c.id === id);
+    const next = window.prompt('Rename conversation', current?.title || '');
+    if (next == null) return;
+    const trimmed = next.trim();
+    if (!trimmed) return;
+    try {
+      await renameConversation(id, trimmed);
+      notify('Conversation renamed.');
+    } catch {
+      notify('Could not rename conversation.');
+    }
+  };
+
+  const handleDelete = async (id) => {
+    const current = conversations.find((c) => c.id === id);
+    if (!window.confirm(`Delete "${current?.title || 'this conversation'}"? This cannot be undone.`)) return;
+    try {
+      await removeConversation(id);
+      notify('Conversation deleted.');
+    } catch {
+      notify('Could not delete conversation.');
+    }
+  };
+
+  const handleSearch = (query) => refresh(query);
+
+  const handleClearMemory = async () => {
+    if (!window.confirm('Clear the assistant’s short-term memory? Saved conversations are kept.')) return;
+    try {
+      await resetMemory();
+      notify('Short-term memory cleared.');
+    } catch {
+      notify('Could not clear memory.');
+    }
     setSettingsOpen(false);
-    setView('assistant');
-    notify('Local conversation history cleared.');
   };
 
   const hasConversation = messages.length > 0 || Boolean(streamingMsg) || thinking;
@@ -299,7 +351,9 @@ function App() {
           onSelectConversation={handleSelectConversation}
           onNewConversation={handleNewConversation}
           onOpenSettings={() => setSettingsOpen(true)}
-          onClearHistory={handleClearHistory}
+          onSearch={handleSearch}
+          onRenameConversation={handleRename}
+          onDeleteConversation={handleDelete}
         />
 
         <main className="glass-panel flex min-w-0 flex-1 flex-col overflow-hidden rounded-[28px]">
@@ -308,10 +362,11 @@ function App() {
             currentView={view}
             aiStatus={aiStatus}
             privateMode={privateMode}
+            desktop={isDesktop()}
             onTogglePrivate={() => {
               const next = !privateMode;
               setPrivateMode(next);
-              notify(next ? 'Private mode on — new messages stay in memory only.' : 'Private mode off — conversations are saved locally.');
+              notify(next ? 'Private mode on — new messages stay in memory only.' : 'Private mode off — conversations are saved.');
             }}
             onOpenSettings={() => setSettingsOpen(true)}
             onThemeClick={() => notify('Light theme is coming soon.')}
@@ -320,12 +375,23 @@ function App() {
           <section className="relative flex min-h-0 flex-1 flex-col">
             <div className="scrollbar-subtle flex-1 overflow-y-auto px-3 pb-8 pt-6 sm:px-6 lg:px-10">
               <div className="mx-auto max-w-4xl">
-                {view === 'memory' && <MemoryView />}
+                {view === 'memory' && <MemoryView onClearMemory={handleClearMemory} />}
                 {view === 'workspace' && <WorkspaceView />}
+                {view === 'system' && <SystemStatusView status={status} backendOnline={backendOnline} onRefreshStatus={() => loadStatus()} />}
+                {view === 'cyber' && <CyberView />}
+                {view === 'healing' && <HealingView />}
                 {view === 'assistant' &&
                   (!hasConversation ? (
                     <div className="mt-6">
-                      <EmptyState backendOnline={backendOnline} prompts={promptIdeas} onPick={handlePickPrompt} />
+                      {loadingMessages ? (
+                        <div className="space-y-3" aria-busy="true">
+                          {[0, 1, 2].map((i) => (
+                            <div key={i} className="h-16 animate-pulse rounded-2xl border border-white/[0.06] bg-white/[0.03]" />
+                          ))}
+                        </div>
+                      ) : (
+                        <EmptyState backendOnline={backendOnline} prompts={promptIdeas} onPick={handlePickPrompt} />
+                      )}
                     </div>
                   ) : (
                     <div
@@ -366,6 +432,8 @@ function App() {
                   value={message}
                   onChange={setMessage}
                   onSubmit={() => submitMessage()}
+                  onStop={handleStop}
+                  busy={busy}
                   disabled={busy}
                   inputRef={composerRef}
                 />
@@ -380,10 +448,11 @@ function App() {
         onClose={() => setSettingsOpen(false)}
         status={status}
         backendOnline={backendOnline}
+        desktop={isDesktop()}
         onRefreshStatus={() => loadStatus()}
         reduceMotion={reduceMotion}
         onToggleReduceMotion={setReduceMotion}
-        onClearHistory={handleClearHistory}
+        onClearMemory={handleClearMemory}
       />
     </div>
   );

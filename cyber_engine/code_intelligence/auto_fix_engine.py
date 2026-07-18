@@ -9,8 +9,9 @@ import py_compile
 import time
 import datetime
 from .fix_rules import (
-from typing import , DISABLED_RULES, Dict, FIXABLE_SYMBOLS, List, List
+    DISABLED_RULES, FIXABLE_SYMBOLS,
     apply_fix, MIN_CONFIDENCE_THRESHOLD, decay_rule_stats, evaluate_rule_governance, get_rule_confidence, is_rule_enabled, load_rule_stats, save_rule_stats, set_governance_mode, update_rule_confidence)
+from typing import Dict, List
 
 from .rollback_manager import create_backup, restore_backup, delete_backup
 from .patch_validator import validate_patch

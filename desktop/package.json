@@ -1,0 +1,74 @@
+{
+  "name": "chhoti-don-desktop",
+  "productName": "CHHOTI DON",
+  "version": "1.0.0",
+  "description": "CHHOTI DON — native Windows desktop shell for the local AI command center",
+  "author": "Bharat Kumar",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.chhotidon.desktop",
+    "productName": "CHHOTI DON",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "main/**/*",
+      "preload/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "..",
+        "to": "app_root",
+        "filter": [
+          "app.py",
+          "requirements.txt",
+          "chhoti_don_ui.html",
+          "core/**/*",
+          "cyber_engine/**/*",
+          "tools/**/*",
+          "chhoti_agents/**/*",
+          "chhoti-don-react/dist/**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.pyo"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "CHHOTI-DON-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "CHHOTI DON",
+      "uninstallDisplayName": "CHHOTI DON",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "CHHOTI-DON-portable-${version}.exe"
+    }
+  }
+}

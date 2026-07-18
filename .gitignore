@@ -6,6 +6,11 @@ chhoti-don-react/.vite/
 .vite/
 *.tsbuildinfo
 
+# ── Desktop (Electron) build artifacts ───────────────────────
+desktop/node_modules/
+desktop/release/
+desktop/*.log
+
 # ── Python ───────────────────────────────────────────────────
 __pycache__/
 *.py[cod]

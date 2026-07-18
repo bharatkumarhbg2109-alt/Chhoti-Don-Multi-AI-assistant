@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import Icon from './Icon';
 import { useToast } from '../context/ToastContext';
 
-export default function ChatComposer({ value, onChange, onSubmit, disabled, inputRef }) {
+export default function ChatComposer({ value, onChange, onSubmit, onStop, busy = false, disabled, inputRef }) {
   const localRef = useRef(null);
   const textareaRef = inputRef ?? localRef;
   const { notify } = useToast();
@@ -54,15 +54,26 @@ export default function ChatComposer({ value, onChange, onSubmit, disabled, inpu
         >
           <Icon name="mic" className="h-[18px] w-[18px]" />
         </button>
-        <button
-          type="button"
-          disabled={disabled || !value.trim()}
-          onClick={onSubmit}
-          aria-label="Send message"
-          className="group mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-rose-300/25 bg-gradient-to-br from-rose-400/35 via-fuchsia-500/30 to-violet-600/35 text-rose-50 shadow-brand transition duration-300 hover:scale-105 hover:border-rose-200/55 hover:shadow-[0_0_40px_rgba(244,63,94,.30)] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:scale-100"
-        >
-          <Icon name="send" className="h-[18px] w-[18px] transition-transform duration-300 group-hover:translate-x-0.5" />
-        </button>
+        {busy && onStop ? (
+          <button
+            type="button"
+            onClick={onStop}
+            aria-label="Stop generating"
+            className="group mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-amber-300/40 bg-gradient-to-br from-amber-400/30 to-rose-500/25 text-amber-50 shadow-brand transition duration-300 hover:scale-105 hover:border-amber-200/60"
+          >
+            <Icon name="stop" className="h-[16px] w-[16px]" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            disabled={disabled || !value.trim()}
+            onClick={onSubmit}
+            aria-label="Send message"
+            className="group mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-2xl border border-rose-300/25 bg-gradient-to-br from-rose-400/35 via-fuchsia-500/30 to-violet-600/35 text-rose-50 shadow-brand transition duration-300 hover:scale-105 hover:border-rose-200/55 hover:shadow-[0_0_40px_rgba(244,63,94,.30)] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:scale-100"
+          >
+            <Icon name="send" className="h-[18px] w-[18px] transition-transform duration-300 group-hover:translate-x-0.5" />
+          </button>
+        )}
       </div>
       <p className="mt-2 text-center text-[10px] text-slate-600">
         Chhoti Don can make mistakes. Verify important information.
