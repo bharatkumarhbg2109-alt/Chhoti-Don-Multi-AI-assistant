@@ -12,7 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
+const { spawn, execFile, execFileSync } = require('child_process');
 
 const cfg = require('./config.cjs');
 const { httpGet, isReachable, waitForUrl } = require('./serviceHealth.cjs');
@@ -44,20 +44,52 @@ function logStream(name) {
 function pidFile(name) {
   return path.join(cfg.runtimeDir(), `${name}.pid`);
 }
+function metaFile(name) {
+  return path.join(cfg.runtimeDir(), `${name}.pid.json`);
+}
 
-function writePid(name, pid) {
+/**
+ * Record ownership metadata for a process we started. Writes a structured
+ * `<name>.pid.json` (pid, exe, command, start time, ownership, project id) and
+ * a plain `<name>.pid` for the PowerShell Stop script's compatibility.
+ */
+function writeProcessMetadata(name, meta) {
+  const record = {
+    pid: meta.pid,
+    exe: meta.exe || null,
+    command: meta.command || null,
+    startTime: new Date().toISOString(),
+    startedByChhotiDon: true,
+    projectRoot: cfg.projectRoot(),
+  };
   try {
-    fs.writeFileSync(pidFile(name), String(pid), 'ascii');
+    fs.writeFileSync(metaFile(name), JSON.stringify(record, null, 2));
   } catch {
     /* ignore */
+  }
+  try {
+    fs.writeFileSync(pidFile(name), String(meta.pid), 'ascii');
+  } catch {
+    /* ignore */
+  }
+  return record;
+}
+
+function readProcessMetadata(name) {
+  try {
+    return JSON.parse(fs.readFileSync(metaFile(name), 'utf8'));
+  } catch {
+    return null;
   }
 }
 
 function removePid(name) {
-  try {
-    fs.rmSync(pidFile(name), { force: true });
-  } catch {
-    /* ignore */
+  for (const f of [pidFile(name), metaFile(name)]) {
+    try {
+      fs.rmSync(f, { force: true });
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -71,19 +103,55 @@ function pidAlive(pid) {
   }
 }
 
-/** Remove PID files whose process is no longer running. */
+/** Normalise an executable name for comparison (basename, lowercase, no .exe). */
+function _norm(p) {
+  return p ? path.basename(String(p)).toLowerCase().replace(/\.exe$/, '') : null;
+}
+
+/** The image name of a running PID on Windows (guards against PID reuse). */
+function processImage(pid) {
+  if (process.platform !== 'win32') return null;
+  try {
+    const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
+      encoding: 'utf8',
+    });
+    const m = out.match(/^"([^"]+)"/);
+    return m ? m[1].toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True only when the recorded process is genuinely ours: metadata says we
+ * started it, the PID is alive, and the live image matches what we recorded
+ * (so a reused PID now belonging to an unrelated program is never treated as
+ * owned).
+ */
+function isOwnedProcess(name) {
+  const meta = readProcessMetadata(name);
+  if (!meta || !meta.startedByChhotiDon || !meta.pid) return false;
+  if (!pidAlive(meta.pid)) return false;
+  const expected = _norm(meta.exe) || (name === 'backend' ? 'python' : name);
+  const actual = _norm(processImage(meta.pid));
+  if (expected && actual && actual !== expected) return false;
+  return true;
+}
+
+/** Remove PID/metadata files whose process is no longer running (or not ours). */
 function cleanupStalePids() {
   for (const name of ['backend', 'ollama', 'frontend']) {
-    const f = pidFile(name);
-    if (!fs.existsSync(f)) continue;
-    const raw = (fs.readFileSync(f, 'utf8') || '').trim();
-    const pid = Number(raw);
-    if (!raw || Number.isNaN(pid) || !pidAlive(pid)) {
+    const meta = readProcessMetadata(name);
+    const plain = fs.existsSync(pidFile(name));
+    if (!meta && !plain) continue;
+    const pid = meta ? meta.pid : Number((fs.readFileSync(pidFile(name), 'utf8') || '').trim());
+    if (!pid || Number.isNaN(pid) || !pidAlive(pid)) {
       removePid(name);
       log(`Removed stale PID file: ${name}`);
     }
   }
 }
+const cleanupStaleProcesses = cleanupStalePids;
 
 // ── Ollama ────────────────────────────────────────────────────
 async function inspectOllama() {
@@ -134,7 +202,7 @@ async function startOllamaIfNeeded(onProgress) {
   state.ollama.child = child;
   state.ollama.owned = true;
   state.ollama.pid = child.pid;
-  writePid('ollama', child.pid);
+  writeProcessMetadata('ollama', { pid: child.pid, exe: info.exe, command: `${info.exe} serve` });
 
   const ready = await waitForUrl(cfg.OLLAMA_TAGS_URL, { timeoutMs: 25000, intervalMs: 700 });
   const after = await inspectOllama();
@@ -178,7 +246,7 @@ async function startBackendIfNeeded(onProgress) {
   state.backend.child = child;
   state.backend.owned = true;
   state.backend.pid = child.pid;
-  writePid('backend', child.pid);
+  writeProcessMetadata('backend', { pid: child.pid, exe: py.cmd, command: `${py.cmd} app.py` });
 
   const healthy = await waitForUrl(cfg.BACKEND_HEALTH_URL, { timeoutMs: 60000, intervalMs: 600 });
   return { started: true, healthy, error: healthy ? null : 'Backend health check timed out. See runtime backend.log.' };
@@ -259,7 +327,20 @@ async function stopOne(name, { graceMs = 4000 } = {}) {
     return;
   }
   const pid = s.pid;
-  log(`Stopping owned ${name} (PID ${pid})…`);
+  // Guard against PID reuse: only act on a live PID whose image matches what we
+  // recorded (the plain PID from our own child is authoritative this session,
+  // but we still verify before any forceful tree kill).
+  const meta = readProcessMetadata(name);
+  const expectedImg = _norm(meta && meta.exe) || (name === 'backend' ? 'python' : name);
+  const liveImg = _norm(processImage(pid));
+  if (liveImg && expectedImg && liveImg !== expectedImg) {
+    log(`Refusing to stop ${name} PID ${pid}: image '${liveImg}' != expected '${expectedImg}' (PID reuse).`);
+    removePid(name);
+    s.child = null; s.owned = false; s.pid = null;
+    return;
+  }
+
+  log(`Stopping owned ${name} (PID ${pid})...`);
   // Graceful first.
   try {
     if (s.child) s.child.kill('SIGTERM');
@@ -304,8 +385,21 @@ async function stopOwned({ keepOllama = false } = {}) {
 }
 
 module.exports = {
+  log,
   startAll,
+  startServices: startAll,
+  stopServices: stopOwned,
+  restartServices: async () => {
+    await stopOwned({ keepOllama: state.ollama.owned ? false : true });
+    return startAll(() => {});
+  },
   getStatus,
+  getServiceStatus: getStatus,
+  waitForHealth: (url, opts) => waitForUrl(url || cfg.BACKEND_HEALTH_URL, opts),
+  isOwnedProcess,
+  readProcessMetadata,
+  writeProcessMetadata,
+  cleanupStaleProcesses,
   stopOwned,
   inspectOllama,
   cleanupStalePids,

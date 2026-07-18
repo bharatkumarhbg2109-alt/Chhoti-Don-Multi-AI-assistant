@@ -53,7 +53,7 @@ export default function SettingsModal({
 }) {
   const closeRef = useRef(null);
   const { notify } = useToast();
-  const [quitOnClose, setQuitOnClose] = useState(false);
+  const [minimizeToTray, setMinimizeToTray] = useState(false);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -66,8 +66,8 @@ export default function SettingsModal({
   }, [open, onClose]);
 
   useEffect(() => {
-    if (open && desktop && window.chhotiDon?.getQuitOnClose) {
-      window.chhotiDon.getQuitOnClose().then((v) => setQuitOnClose(Boolean(v))).catch(() => {});
+    if (open && desktop && window.chhotiDon?.getMinimizeToTray) {
+      window.chhotiDon.getMinimizeToTray().then((v) => setMinimizeToTray(Boolean(v))).catch(() => {});
     }
   }, [open, desktop]);
 
@@ -79,10 +79,10 @@ export default function SettingsModal({
   const mode = status?.mode || (status?.simulated ? 'simulation' : '—');
   const db = status?.database;
 
-  const handleQuitToggle = (v) => {
-    setQuitOnClose(v);
-    window.chhotiDon?.setQuitOnClose?.(v);
-    notify(v ? 'The app will quit when the window closes.' : 'The window will minimise to the tray on close.');
+  const handleTrayToggle = (v) => {
+    setMinimizeToTray(v);
+    window.chhotiDon?.setMinimizeToTray?.(v);
+    notify(v ? 'Closing will minimise to the tray. Quit from the tray to fully exit.' : 'Closing the window will fully quit CHHOTI DON.');
   };
 
   const handleRestart = async () => {
@@ -155,10 +155,10 @@ export default function SettingsModal({
               <div className="space-y-2">
                 <div className="flex items-center justify-between rounded-2xl border border-white/[0.07] bg-white/[0.025] px-4 py-3">
                   <div>
-                    <p className="text-xs font-medium text-slate-300">Quit when window closes</p>
-                    <p className="mt-0.5 text-[11px] text-slate-500">Off: closing minimises to the system tray.</p>
+                    <p className="text-xs font-medium text-slate-300">Minimise to tray on close</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500">Off (default): closing the window fully quits and stops all services.</p>
                   </div>
-                  <Toggle checked={quitOnClose} onChange={handleQuitToggle} label="Quit when window closes" />
+                  <Toggle checked={minimizeToTray} onChange={handleTrayToggle} label="Minimise to tray on close" />
                 </div>
                 <div className="flex items-center justify-between rounded-2xl border border-white/[0.07] bg-white/[0.025] px-4 py-3">
                   <div>

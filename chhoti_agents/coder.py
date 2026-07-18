@@ -39,6 +39,9 @@ class CoderAgent(BaseAgent):
         Execute coding task.
         Preserved + upgraded with multi-mode routing.
         """
+        # Defensive: upstream pipeline steps may hand us a non-string (dict/None).
+        if not isinstance(task, str):
+            task = "" if task is None else str(task)
         task_lower = task.lower()
         language = self._detect_language(task)
 

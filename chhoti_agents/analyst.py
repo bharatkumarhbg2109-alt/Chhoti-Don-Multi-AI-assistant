@@ -39,6 +39,8 @@ class AnalystAgent(BaseAgent):
         Execute analytical task.
         Preserved + upgraded with multi-mode analysis.
         """
+        if not isinstance(task, str):
+            task = "" if task is None else str(task)
         task_lower = task.lower()
 
         # Route to specialized analysis

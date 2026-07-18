@@ -62,6 +62,17 @@
           <button id="retry">Retry</button>
         </div>
       </div>
+
+      <div class="error" id="setup" style="border-color: rgba(217,70,239,.35); background: rgba(88,28,135,.18);">
+        <h2 id="setup-title" style="color:#e9a8ff;">Model setup needed</h2>
+        <p>The configured model <code id="setup-model"></code> isn't installed in Ollama yet.</p>
+        <p>Install it, then click Retry:</p>
+        <p><code id="setup-cmd" style="display:block; padding:8px 10px; background:rgba(0,0,0,.35); border-radius:8px;"></code></p>
+        <div class="actions">
+          <button id="setup-retry">Retry</button>
+          <button id="setup-continue" style="border-color:rgba(148,163,184,.4); background:rgba(148,163,184,.15); color:#e2e8f0;">Continue in simulated mode</button>
+        </div>
+      </div>
     </div>
 
     <script>
@@ -90,11 +101,31 @@
           }
         });
       }
-      document.getElementById('retry').addEventListener('click', () => {
+      const setupBox = document.getElementById('setup');
+      if (window.chhotiLoader && window.chhotiLoader.onSetup) {
+        window.chhotiLoader.onSetup((data) => {
+          bar.style.display = 'none';
+          statusEl.textContent = 'One more step to enable live AI.';
+          setupBox.style.display = 'block';
+          document.getElementById('setup-model').textContent = (data && data.model) || 'the model';
+          document.getElementById('setup-cmd').textContent = (data && data.pullCommand) || 'ollama pull';
+        });
+      }
+
+      const goRetry = () => {
         errorBox.style.display = 'none';
+        setupBox.style.display = 'none';
         bar.style.display = 'block';
         statusEl.textContent = 'Retrying…';
         window.chhotiLoader && window.chhotiLoader.retry();
+      };
+      document.getElementById('retry').addEventListener('click', goRetry);
+      document.getElementById('setup-retry').addEventListener('click', goRetry);
+      document.getElementById('setup-continue').addEventListener('click', () => {
+        setupBox.style.display = 'none';
+        bar.style.display = 'block';
+        statusEl.textContent = 'Loading in simulated mode…';
+        window.chhotiLoader && window.chhotiLoader.continueAnyway();
       });
     </script>
   </body>

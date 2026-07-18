@@ -11,7 +11,7 @@ which keeps /api calls relative and avoids cross-origin complications.
 
 from flask import Flask, request, jsonify, send_from_directory, abort
 from flask_cors import CORS
-import os, sys, time, socket, traceback
+import os, sys, time, socket, traceback, logging, uuid
 
 # Ensure UTF-8 stdout/stderr so emoji log lines don't crash under a cp1252
 # console or when the launcher redirects output to a log file (Windows).
@@ -26,6 +26,13 @@ from core.task_classifier import detect_task, detect_coding_action
 from core.brain_router import detect_intent, route_coding_tool
 from core import history_store
 from core import capabilities as capabilities_registry
+from core import safety_policy
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+log = logging.getLogger("chhoti.api")
 
 _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 _RUNTIME_DIR = os.environ.get("CHHOTI_DON_RUNTIME_DIR") or os.path.join(_PROJECT_ROOT, ".runtime")
@@ -109,18 +116,45 @@ def serve_favicon():
     abort(404)
 
 
+# ── Structured, sanitized error helper ────────────────────────
+def _chat_error(req_id, code, message, http_status, retryable):
+    """Return a consistent error object. Never leaks tracebacks / paths / secrets.
+
+    `response` is kept for backward compatibility with the existing frontend,
+    which reads `data.response || data.message || data.error`.
+    """
+    return jsonify({
+        "status":  "error",
+        "success": False,
+        "response": message,
+        "error": {
+            "code": code,
+            "message": message,
+            "retryable": bool(retryable),
+            "request_id": req_id,
+        },
+    }), http_status
+
+
 # ── Main Chat ─────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 def chat():
+    req_id = uuid.uuid4().hex[:8]
+    t0 = time.time()
     try:
-        data      = request.get_json(silent=True) or {}
-        message   = str(data.get("message", "")).strip()
-        tool_id   = data.get("tool", "chat")
-        conv_id   = data.get("conversation_id")
-        private   = bool(data.get("private", False))
+        data = request.get_json(silent=True)
+        if data is None:
+            return _chat_error(req_id, "BAD_REQUEST",
+                               "Invalid or missing JSON request body.", 400, retryable=False)
+
+        message      = str(data.get("message", "")).strip()
+        tool_id      = data.get("tool", "chat")
+        conv_id      = data.get("conversation_id")
+        private      = bool(data.get("private", False))
         persist_user = bool(data.get("persist_user", True))
         if not message:
-            return jsonify({"status": "error", "response": "Empty message"}), 400
+            return _chat_error(req_id, "EMPTY_MESSAGE",
+                               "Message cannot be empty.", 400, retryable=False)
 
         provider, model, runtime_mode, live, *_ = _current_provider_model()
 
@@ -128,9 +162,26 @@ def chat():
         if conv_id and not private and persist_user:
             history_store.add_message(conv_id, "user", message)
 
-        t0     = time.time()
-        result = _route_to_tool(message, tool_id)
-        text   = _extract_response(result)
+        # ── Safety policy: decide before any model / agent work ──
+        decision = safety_policy.evaluate(message)
+        category = decision.get("category")
+
+        if decision["action"] == "refuse":
+            # A policy refusal is a NORMAL assistant message, not a server error.
+            text = decision["message"]
+            intent, task_type, engine = "safety_refusal", "policy", "safety_policy"
+        elif decision["action"] == "educational":
+            # Answer defensively via the LLM — never the offensive planner.
+            engine = "educational"
+            result = chhoti_don.brain_task(safety_policy.educational_prompt(message))
+            text = _extract_response(result)
+            intent, task_type = detect_intent(message), detect_task(message)
+        else:
+            engine = "router"
+            result = _route_to_tool(message, tool_id)
+            text = _extract_response(result)
+            intent, task_type = detect_intent(message), detect_task(message)
+
         exec_t = round(time.time() - t0, 2)
 
         assistant_msg = None
@@ -138,27 +189,35 @@ def chat():
             assistant_msg = history_store.add_message(
                 conv_id, "assistant", text,
                 status="complete", provider=provider, model=model,
-                metadata={"tool": tool_id, "execution_time": exec_t},
+                metadata={"tool": tool_id, "execution_time": exec_t, "category": category},
                 auto_title=False,
             )
 
+        log.info("chat req=%s route=%s intent=%s task=%s engine=%s provider=%s model=%s dur=%ss",
+                 req_id, tool_id, intent, task_type, engine, provider, model, exec_t)
+
         return jsonify({
             "status":         "success",
+            "success":        True,
             "response":       text,
             "tool":           tool_id,
-            "intent":         detect_intent(message),
-            "task_type":      detect_task(message),
+            "intent":         intent,
+            "task_type":      task_type,
             "execution_time": exec_t,
             "conversation_id": conv_id,
             "message_id":     assistant_msg["id"] if assistant_msg else None,
             "provider":       provider,
             "model":          model,
             "live":           live,
+            "category":       category,      # 'policy_refusal' | 'security_education' | None
         })
 
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({"status": "error", "response": f"❌ Error: {str(e)}"}), 500
+    except Exception:
+        # Log the full traceback server-side; return a sanitized structured error.
+        log.exception("chat failed req=%s", req_id)
+        return _chat_error(req_id, "INTERNAL_ERROR",
+                           "The request could not be completed. Please try again.",
+                           500, retryable=True)
 
 
 def _route_to_tool(message: str, tool_id: str) -> dict:
@@ -176,9 +235,11 @@ def _route_to_tool(message: str, tool_id: str) -> dict:
         task   = detect_task(message)
         if intent in ["coding", "debug"] or task == "coding":
             return chhoti_don.coding_task(message)
-        elif intent == "malware" or task == "malware":
-            return chhoti_don.autonomous_llm_task(message)
         else:
+            # Security / analytics / research / general questions are answered
+            # directly by the LLM. The offensive autonomous planner is never
+            # used for free-form chat (only explicit tool ids above), which
+            # avoids routing benign questions into an attack-planning pipeline.
             return chhoti_don.brain_task(message)
 
 

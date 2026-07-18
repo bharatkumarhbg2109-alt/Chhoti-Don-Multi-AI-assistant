@@ -25,17 +25,20 @@ const PRELOAD = path.join(__dirname, '..', 'preload', 'preload.cjs');
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
+let cleanupDone = false;
 let servicesReady = false;
 
 // ── Preferences (persisted JSON in the runtime dir) ───────────
+// Default lifecycle: closing the window fully quits the app (and stops all
+// app-owned services). Minimise-to-tray is an explicit opt-in, off by default.
 function prefsFile() {
   return path.join(cfg.runtimeDir(), 'desktop-prefs.json');
 }
 function loadPrefs() {
   try {
-    return { quitOnClose: false, keepOllama: false, ...JSON.parse(fs.readFileSync(prefsFile(), 'utf8')) };
+    return { minimizeToTrayOnClose: false, keepOllama: false, ...JSON.parse(fs.readFileSync(prefsFile(), 'utf8')) };
   } catch {
-    return { quitOnClose: false, keepOllama: false };
+    return { minimizeToTrayOnClose: false, keepOllama: false };
   }
 }
 function savePrefs(p) {
@@ -46,7 +49,29 @@ function savePrefs(p) {
     /* ignore */
   }
 }
-let prefs = { quitOnClose: false, keepOllama: false };
+let prefs = { minimizeToTrayOnClose: false, keepOllama: false };
+
+/**
+ * Single, idempotent shutdown path: stop app-owned services (backend, and
+ * Ollama/frontend only if we started them), then exit. Bounded so a hung
+ * child can never block quit forever.
+ */
+async function cleanupAndExit() {
+  if (cleanupDone) return;
+  cleanupDone = true;
+  isQuitting = true;
+  pm.log('Shutdown requested - stopping app-owned services.');
+  try {
+    await Promise.race([
+      pm.stopOwned({ keepOllama: prefs.keepOllama }),
+      new Promise((r) => setTimeout(r, 8000)), // bounded timeout
+    ]);
+  } catch (e) {
+    pm.log('Shutdown cleanup error: ' + (e && e.message ? e.message : e));
+  }
+  pm.log('Shutdown complete - exiting.');
+  app.exit(0);
+}
 
 // ── Icon ──────────────────────────────────────────────────────
 function appIcon() {
@@ -103,12 +128,14 @@ function createWindow() {
     }
   });
 
-  // Minimise to tray on close unless the user chose "quit on close".
+  // Default: the X button fully quits (services are stopped via cleanupAndExit).
+  // Minimise-to-tray only happens if the user explicitly enabled it.
   mainWindow.on('close', (event) => {
-    if (!isQuitting && !prefs.quitOnClose) {
+    if (!isQuitting && prefs.minimizeToTrayOnClose) {
       event.preventDefault();
       mainWindow.hide();
     }
+    // otherwise allow the close → 'closed' → window-all-closed → quit + cleanup
   });
 
   mainWindow.on('closed', () => {
@@ -173,13 +200,26 @@ async function runStartup() {
   }
 
   if (result.modelMissing) {
-    // Not fatal — the backend runs in simulated mode. Inform, then continue.
-    sendProgress(`Model ${result.modelMissing.model} not installed — continuing in simulated mode.`);
+    // Show a setup screen: the exact model + pull command + Retry. The user can
+    // also continue in simulated mode (the backend is already healthy).
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('startup:setup', {
+        model: result.modelMissing.model,
+        pullCommand: result.modelMissing.pullCommand,
+      });
+    }
+    return;
   }
 
+  await loadDashboard();
+}
+
+async function loadDashboard() {
   servicesReady = true;
-  sendProgress('Ready. Loading dashboard…');
-  await mainWindow.loadURL(cfg.APP_URL);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('startup:progress', 'Ready. Loading dashboard…');
+    await mainWindow.loadURL(cfg.APP_URL);
+  }
   buildTray();
 }
 
@@ -265,11 +305,11 @@ function registerIpc() {
   });
   ipcMain.handle('window:close', () => mainWindow && mainWindow.close());
 
-  ipcMain.handle('prefs:getQuitOnClose', () => prefs.quitOnClose);
-  ipcMain.handle('prefs:setQuitOnClose', (_e, v) => {
-    prefs.quitOnClose = Boolean(v);
+  ipcMain.handle('prefs:getMinimizeToTray', () => prefs.minimizeToTrayOnClose);
+  ipcMain.handle('prefs:setMinimizeToTray', (_e, v) => {
+    prefs.minimizeToTrayOnClose = Boolean(v);
     savePrefs(prefs);
-    return prefs.quitOnClose;
+    return prefs.minimizeToTrayOnClose;
   });
   ipcMain.handle('prefs:getKeepOllama', () => prefs.keepOllama);
   ipcMain.handle('prefs:setKeepOllama', (_e, v) => {
@@ -289,6 +329,11 @@ function registerIpc() {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.loadFile(LOADING_HTML).then(() => runStartup());
     }
+  });
+
+  // "Continue in simulated mode" from the model-missing setup screen.
+  ipcMain.on('startup:continue', () => {
+    loadDashboard();
   });
 }
 
@@ -314,20 +359,14 @@ if (!gotLock) {
   });
 
   app.on('window-all-closed', () => {
-    // Stay alive in the tray on Windows/Linux; only fully quit via tray/quit.
-    if (process.platform === 'darwin') return;
-    if (prefs.quitOnClose) app.quit();
+    // If the window was closed (and not kept in the tray), fully quit.
+    if (!prefs.minimizeToTrayOnClose) app.quit();
   });
 
-  app.on('before-quit', async (event) => {
-    if (isQuitting) return;
-    isQuitting = true;
+  app.on('before-quit', (event) => {
+    // Run the bounded cleanup exactly once, then let the process exit.
+    if (cleanupDone) return;
     event.preventDefault();
-    try {
-      await pm.stopOwned({ keepOllama: prefs.keepOllama });
-    } catch {
-      /* ignore */
-    }
-    app.exit(0);
+    cleanupAndExit();
   });
 }

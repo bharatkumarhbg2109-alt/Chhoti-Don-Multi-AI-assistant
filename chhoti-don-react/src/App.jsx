@@ -136,10 +136,11 @@ function App() {
     setStreamingMsg(null);
   }, []);
 
-  useEffect(() => {
-    cancelActiveTurn();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId]);
+  // NOTE: we intentionally do NOT cancel the active turn on every activeId
+  // change. The first message in a new draft creates its conversation mid-turn
+  // (which changes activeId); cancelling here would abort that in-flight
+  // request. Cancellation happens only on explicit user actions below
+  // (selecting another conversation / starting a new one).
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' });
@@ -280,6 +281,13 @@ function App() {
   };
 
   const handleSelectConversation = (id) => {
+    if (id === activeId) {
+      setView('assistant');
+      setSidebarOpen(false);
+      return;
+    }
+    // Switching to a different conversation cancels any in-progress turn.
+    cancelActiveTurn();
     selectConversation(id);
     setView('assistant');
     setSidebarOpen(false);

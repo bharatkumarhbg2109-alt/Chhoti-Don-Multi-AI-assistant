@@ -19,6 +19,26 @@ from core.brain_router import route_task, detect_intent, route_coding_tool
 from core.local_model_engine import execute
 
 
+def _as_text(value) -> str:
+    """Coerce an arbitrary pipeline value into a safe text task string."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        # Prefer common human-readable fields when chaining agent/tool output.
+        for key in ("message", "output", "response", "explanation", "text", "result"):
+            v = value.get(key)
+            if isinstance(v, str) and v.strip():
+                return v
+        try:
+            import json
+            return json.dumps(value, ensure_ascii=False)[:4000]
+        except Exception:
+            return str(value)[:4000]
+    return str(value)[:4000]
+
+
 class ManagerAgent:
 
     def __init__(self):
@@ -543,13 +563,18 @@ class ManagerAgent:
             step_type = step.get("type")
             step_name = step.get("name")
 
+            # Agents and tools expect a text task. Earlier steps may have produced
+            # a dict/list/None, so always coerce the chained output to text before
+            # feeding it into the next step (prevents e.g. dict.lower() crashes).
+            step_input = current_output if isinstance(current_output, str) else _as_text(current_output)
+
             if step_type == "agent":
                 agent = self.create_agent(step_name)
-                result = agent.act(current_output)
+                result = agent.act(step_input)
 
             elif step_type == "tool":
                 tool_exec = self.tool_registry.execute(
-                    step_name, {"input": current_output}
+                    step_name, {"input": step_input}
                 )
                 result = tool_exec.get("result") if tool_exec else None
 
