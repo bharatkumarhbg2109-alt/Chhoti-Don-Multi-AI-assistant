@@ -18,12 +18,26 @@ html {
   background: #050308;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
-  overflow: hidden;
+  overflow: hidden; /* the app manages its own internal scrolling */
   background: #050308;
+}
+
+#root {
+  height: 100%;
+}
+
+/* Fixed viewport-height app shell (dvh with a vh fallback for older engines). */
+.app-shell {
+  height: 100vh;
+  height: 100dvh;
 }
 
 button,
@@ -35,13 +49,45 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
-@media (pointer: fine) {
-  body,
-  button,
-  textarea,
-  a {
-    cursor: none;
-  }
+/* Native cursor affordances (used whenever the custom cursor is NOT active,
+   e.g. touch devices, reduced motion, or while a modal is open). */
+button,
+[role='button'],
+[role='switch'],
+[role='menuitem'],
+a[href],
+summary,
+label {
+  cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  cursor: text;
+}
+
+/* The custom cursor hides the native cursor ONLY when it is genuinely active.
+   `html.custom-cursor` is added by CursorTrail only on capable devices, with
+   motion allowed and no modal open — so the cursor can never be left invisible. */
+html.custom-cursor,
+html.custom-cursor body,
+html.custom-cursor a,
+html.custom-cursor button,
+html.custom-cursor input,
+html.custom-cursor textarea,
+html.custom-cursor select,
+html.custom-cursor [role='button'],
+html.custom-cursor [role='switch'],
+html.custom-cursor [role='menuitem'],
+html.custom-cursor label {
+  cursor: none;
+}
+
+/* Safety: while any modal/overlay is open, never show the custom cursor dots. */
+html.modal-open .cursor-core,
+html.modal-open .cursor-trail-dot {
+  display: none !important;
 }
 
 @layer components {
@@ -152,26 +198,44 @@ button {
   opacity: 0.52;
 }
 
+/* Subtle custom scrollbar — thin, dark track, muted rose→violet thumb. Applied
+   only to real scroll containers (message list, sidebar list, modal body). */
 .scrollbar-subtle {
   scrollbar-width: thin;
-  scrollbar-color: rgba(251, 113, 133, 0.17) transparent;
+  scrollbar-color: rgba(244, 114, 182, 0.32) rgba(255, 255, 255, 0.04);
 }
 
 .scrollbar-subtle::-webkit-scrollbar {
-  width: 5px;
+  width: 8px;
+  height: 8px;
 }
 
 .scrollbar-subtle::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.035);
+  border-radius: 999px;
 }
 
 .scrollbar-subtle::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(251, 113, 133, 0.14);
+  background: linear-gradient(180deg, rgba(251, 113, 133, 0.38), rgba(217, 70, 239, 0.34));
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .scrollbar-subtle::-webkit-scrollbar-thumb:hover {
-  background: rgba(232, 121, 249, 0.23);
+  background: linear-gradient(180deg, rgba(251, 113, 133, 0.6), rgba(217, 70, 239, 0.55));
+  background-clip: padding-box;
+}
+
+/* Long content must wrap inside message bubbles; code scrolls inside itself. */
+.markdown-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.markdown-body pre {
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 @media (max-width: 640px) {

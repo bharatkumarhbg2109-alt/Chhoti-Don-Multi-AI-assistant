@@ -52,17 +52,45 @@ export default function SettingsModal({
   onClearMemory,
 }) {
   const closeRef = useRef(null);
+  const panelRef = useRef(null);
+  const previouslyFocused = useRef(null);
   const { notify } = useToast();
   const [minimizeToTray, setMinimizeToTray] = useState(false);
 
   useEffect(() => {
     if (!open) return undefined;
+    previouslyFocused.current = document.activeElement;
     closeRef.current?.focus();
+
     const onKey = (e) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      // Trap focus inside the modal.
+      const nodes = panelRef.current?.querySelectorAll(
+        'button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])',
+      );
+      const list = nodes ? Array.from(nodes).filter((el) => !el.disabled && el.offsetParent !== null) : [];
+      if (!list.length) return;
+      const first = list[0];
+      const last = list[list.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      // Return focus to whatever opened the modal (the Settings button).
+      const prev = previouslyFocused.current;
+      if (prev && typeof prev.focus === 'function') prev.focus();
+    };
   }, [open, onClose]);
 
   useEffect(() => {
@@ -99,8 +127,11 @@ export default function SettingsModal({
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Settings">
       <button type="button" aria-label="Close settings" onClick={onClose} className="absolute inset-0 bg-[#050308]/80 backdrop-blur-sm" />
-      <div className="glass-panel relative z-10 w-full max-w-lg overflow-hidden rounded-[28px]">
-        <div className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
+      <div
+        ref={panelRef}
+        className="glass-panel relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-[28px]"
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-white/[0.06] px-5 py-4">
           <div className="flex items-center gap-3">
             <div className="grid h-9 w-9 place-items-center rounded-xl border border-rose-200/15 bg-gradient-to-br from-rose-400/20 via-fuchsia-500/15 to-violet-600/20">
               <Icon name="settings" className="h-5 w-5 text-rose-100" />
@@ -112,7 +143,7 @@ export default function SettingsModal({
           </button>
         </div>
 
-        <div className="scrollbar-subtle max-h-[70vh] space-y-5 overflow-y-auto p-5">
+        <div className="scrollbar-subtle min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
           <section>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">System status</h3>

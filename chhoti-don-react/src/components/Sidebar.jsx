@@ -99,7 +99,7 @@ export default function Sidebar({
       />
 
       <aside
-        className={`glass-panel fixed inset-y-3 left-3 z-40 flex w-[290px] flex-col rounded-[28px] p-3 transition-transform duration-500 ease-out lg:static lg:inset-auto lg:z-auto lg:h-[calc(100vh-24px)] lg:translate-x-0 ${
+        className={`glass-panel fixed inset-y-3 left-3 z-40 flex w-[290px] flex-col overflow-hidden rounded-[28px] p-3 transition-transform duration-500 ease-out lg:static lg:inset-auto lg:z-auto lg:h-[calc(100dvh-24px)] lg:translate-x-0 ${
           open ? 'translate-x-0' : '-translate-x-[calc(100%+24px)]'
         }`}
       >
@@ -171,7 +171,7 @@ export default function Sidebar({
           </div>
         )}
 
-        <div className="scrollbar-subtle mt-2 flex-1 space-y-1 overflow-y-auto pr-1">
+        <div className="scrollbar-subtle mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
           {conversations.length === 0 && (
             <p className="px-3 py-6 text-center text-[11px] text-slate-600">
               {search.trim() ? 'No matches.' : 'No conversations yet.'}

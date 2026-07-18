@@ -43,12 +43,12 @@ export default function ChatMessage({ role, children, timestamp, isError = false
         </div>
       )}
 
-      <div className={`max-w-[86%] sm:max-w-[78%] ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
+      <div className={`min-w-0 max-w-[86%] sm:max-w-[78%] ${isUser ? 'items-end' : 'items-start'} flex flex-col`}>
         <div
-          className={`relative rounded-[22px] border px-4 py-3 text-[13px] leading-6 shadow-glass sm:px-5 sm:py-4 sm:text-sm ${bubbleClass}`}
+          className={`relative min-w-0 max-w-full rounded-[22px] border px-4 py-3 text-[13px] leading-6 shadow-glass sm:px-5 sm:py-4 sm:text-sm ${bubbleClass}`}
         >
           {isUser || isError ? (
-            <span className="whitespace-pre-wrap break-words">{children}</span>
+            <span className="block whitespace-pre-wrap [overflow-wrap:anywhere]">{children}</span>
           ) : (
             <MarkdownMessage>{children}</MarkdownMessage>
           )}

@@ -13,6 +13,7 @@ import Sidebar from './components/Sidebar';
 import ThinkingIndicator from './components/ThinkingIndicator';
 import TopBar from './components/TopBar';
 import WorkspaceView from './components/WorkspaceView';
+import Icon from './components/Icon';
 import useConversations from './hooks/useConversations';
 import { useToast } from './context/ToastContext';
 import { getStatus, sendMessage, resetMemory, isDesktop } from './services/chatApi';
@@ -73,10 +74,59 @@ function App() {
   });
 
   const chatEndRef = useRef(null);
+  const scrollElRef = useRef(null);
+  const nearBottomRef = useRef(true);
+  const reduceMotionRef = useRef(reduceMotion);
   const composerRef = useRef(null);
   const inFlightRef = useRef(false);
   const abortRef = useRef(null);
   const streamTimerRef = useRef(null);
+  const [showJump, setShowJump] = useState(false);
+
+  const NEAR_BOTTOM_PX = 120;
+  useEffect(() => {
+    reduceMotionRef.current = reduceMotion;
+  }, [reduceMotion]);
+
+  const evalNearBottom = useCallback(() => {
+    const el = scrollElRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+  }, []);
+
+  // Update near-bottom tracking + the jump button, only when the state flips
+  // (a ref, so we do not re-render on every scroll event).
+  const handleScroll = useCallback(() => {
+    const near = evalNearBottom();
+    if (near !== nearBottomRef.current) {
+      nearBottomRef.current = near;
+      setShowJump(!near);
+    }
+  }, [evalNearBottom]);
+
+  // Callback ref: binds the scroll listener the moment the node mounts and
+  // detaches it on unmount — no dependence on effect/ref timing.
+  const attachScroll = useCallback(
+    (node) => {
+      if (scrollElRef.current) scrollElRef.current.removeEventListener('scroll', handleScroll);
+      scrollElRef.current = node;
+      if (node) node.addEventListener('scroll', handleScroll, { passive: true });
+    },
+    [handleScroll],
+  );
+
+  const scrollToBottom = useCallback((force = false) => {
+    const el = scrollElRef.current;
+    if (!el) return;
+    const instant = reduceMotionRef.current || osReducedMotion();
+    if (instant) {
+      el.scrollTop = el.scrollHeight; // direct + immediate
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    }
+    nearBottomRef.current = true;
+    if (force) setShowJump(false);
+  }, []);
 
   const messages = activeMessages;
   const aiStatus = deriveAiStatus(status, backendOnline);
@@ -142,9 +192,26 @@ function App() {
   // request. Cancellation happens only on explicit user actions below
   // (selecting another conversation / starting a new one).
 
+  // Auto-follow new content only when the user is already near the bottom.
+  // A rAF + short timeout re-scroll catches markdown/syntax-highlighting that
+  // lays out over a couple of frames (so conversations open pinned to bottom).
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' });
-  }, [messages, thinking, streamingMsg, reduceMotion]);
+    if (!nearBottomRef.current) return undefined;
+    const raf = requestAnimationFrame(() => scrollToBottom());
+    const t = window.setTimeout(() => {
+      if (nearBottomRef.current) scrollToBottom();
+    }, 120);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(t);
+    };
+  }, [messages, thinking, streamingMsg, scrollToBottom]);
+
+  // Toggle the native cursor / custom cursor suppression while a modal is open.
+  useEffect(() => {
+    document.documentElement.classList.toggle('modal-open', settingsOpen);
+    return () => document.documentElement.classList.remove('modal-open');
+  }, [settingsOpen]);
 
   const finishTurn = () => {
     inFlightRef.current = false;
@@ -243,6 +310,7 @@ function App() {
     if (!content || inFlightRef.current) return;
 
     const wasOffline = backendOnline === false;
+    nearBottomRef.current = true; // sending always scrolls to the latest message
     setActiveMessages((current) => [
       ...current.filter((m) => !m.isError),
       { id: nextId(), role: 'user', text: content, timestamp: 'Now' },
@@ -275,6 +343,7 @@ function App() {
     cancelActiveTurn();
     setMessage('');
     setView('assistant');
+    nearBottomRef.current = true;
     newDraft();
     setSidebarOpen(false);
     requestAnimationFrame(() => composerRef.current?.focus?.());
@@ -288,6 +357,7 @@ function App() {
     }
     // Switching to a different conversation cancels any in-progress turn.
     cancelActiveTurn();
+    nearBottomRef.current = true; // restore the opened conversation at the bottom
     selectConversation(id);
     setView('assistant');
     setSidebarOpen(false);
@@ -344,11 +414,11 @@ function App() {
   const hasConversation = messages.length > 0 || Boolean(streamingMsg) || thinking;
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#050308] text-slate-100 selection:bg-rose-300/25 selection:text-rose-50">
+    <div className="app-shell relative overflow-hidden bg-[#050308] text-slate-100 selection:bg-rose-300/25 selection:text-rose-50">
       <AmbientBackground />
-      <CursorTrail />
+      <CursorTrail reduceMotion={reduceMotion} suppressed={settingsOpen} />
 
-      <div className="relative z-10 flex min-h-screen gap-3 p-3">
+      <div className="relative z-10 flex h-full min-h-0 gap-3 p-3">
         <Sidebar
           open={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
@@ -364,7 +434,7 @@ function App() {
           onDeleteConversation={handleDelete}
         />
 
-        <main className="glass-panel flex min-w-0 flex-1 flex-col overflow-hidden rounded-[28px]">
+        <main className="glass-panel flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[28px]">
           <TopBar
             onOpenSidebar={() => setSidebarOpen(true)}
             currentView={view}
@@ -381,7 +451,10 @@ function App() {
           />
 
           <section className="relative flex min-h-0 flex-1 flex-col">
-            <div className="scrollbar-subtle flex-1 overflow-y-auto px-3 pb-8 pt-6 sm:px-6 lg:px-10">
+            <div
+              ref={attachScroll}
+              className="scrollbar-subtle min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-10 pt-6 sm:px-6 lg:px-10"
+            >
               <div className="mx-auto max-w-4xl">
                 {view === 'memory' && <MemoryView onClearMemory={handleClearMemory} />}
                 {view === 'workspace' && <WorkspaceView />}
@@ -432,6 +505,18 @@ function App() {
                   ))}
               </div>
             </div>
+
+            {view === 'assistant' && showJump && (
+              <button
+                type="button"
+                onClick={() => scrollToBottom(true)}
+                aria-label="Jump to latest message"
+                className="absolute bottom-28 right-5 z-20 flex items-center gap-1.5 rounded-full border border-rose-300/25 bg-[#0c0813]/90 px-3 py-1.5 text-xs text-rose-100 shadow-brand backdrop-blur-xl transition hover:border-rose-200/50 hover:bg-rose-400/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40 sm:right-8 lg:right-12"
+              >
+                <Icon name="chevron" className="h-4 w-4 rotate-90" />
+                Jump to latest
+              </button>
+            )}
 
             {view === 'assistant' && (
               <div className="relative shrink-0 px-3 pb-3 sm:px-6 sm:pb-5 lg:px-10">

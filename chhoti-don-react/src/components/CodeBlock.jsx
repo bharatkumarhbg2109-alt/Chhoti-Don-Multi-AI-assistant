@@ -49,9 +49,10 @@ export default function CodeBlock({ language = 'text', value = '' }) {
           background: 'transparent',
           fontSize: '12.5px',
           lineHeight: 1.6,
+          overflowX: 'auto',
+          maxWidth: '100%',
         }}
         codeTagProps={{ style: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }}
-        wrapLongLines
       >
         {value}
       </SyntaxHighlighter>
