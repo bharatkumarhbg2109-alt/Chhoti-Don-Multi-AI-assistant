@@ -14,6 +14,7 @@ HINGLISH_INDICATORS = [
     "aur", "nahi", "hain", "tum", "main", "mera", "tera", "acha",
     "theek", "shukriya", "batao", "samjhao", "banao", "likho",
     "chalao", "dekho", "bolo", "kaise", "kyun", "kab", "yaar",
+    "ek",
 ]
 
 

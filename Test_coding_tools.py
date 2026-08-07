@@ -237,8 +237,17 @@ print(result)
     "language": "python"
 })
 print_result(result)
-# This test SHOULD fail/error
-tracker.record("Execute Python Error (expected)", result)
+# execute_code SHOULD detect and report the runtime error — correctly
+# reporting it (status="error", non-zero return code) is the pass condition.
+error_detected = (
+    isinstance(result, dict)
+    and result.get("status") == "error"
+    and result.get("return_code") not in (0, None)
+)
+tracker.record(
+    "Execute Python Error (expected)",
+    {"status": "success" if error_detected else "error"},
+)
 
 # Test 9 — SQL
 print_header("EXECUTE CODE — SQL SQLite", 9)

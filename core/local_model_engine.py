@@ -9,13 +9,15 @@ import subprocess
 import shutil
 from typing import Dict, Optional, Optional
 
+from core.config import Config
+
 
 def execute(model_config: Dict, prompt: str) -> str:
     """
     Execute local model.
     Preserved + upgraded with better error handling.
     """
-    model_name = model_config.get("model", "mistral:latest")
+    model_name = model_config.get("model", Config.MAIN_MODEL)
     system_prompt = model_config.get("system_prompt", "")
     temperature = model_config.get("temperature", 0.7)
 

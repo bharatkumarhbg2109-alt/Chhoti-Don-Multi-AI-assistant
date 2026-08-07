@@ -17,7 +17,20 @@ class Config:
 
     # AI Models
     MODEL_NAME = os.getenv("CHHOTI_DON_OPENAI_MODEL", "gpt-4o-mini")
-    LOCAL_MODEL = os.getenv("CHHOTI_DON_OLLAMA_MODEL", "mistral:latest")
+    # LOCAL_MODEL gates local vs. simulation mode and is shown in status.
+    # It must be an installed Ollama tag — kept in sync with MAIN_MODEL.
+    LOCAL_MODEL = os.getenv("CHHOTI_DON_OLLAMA_MODEL", "qwen3.5:latest")
+
+    # ── Local model routing (single source of truth) ──────────
+    # These MUST match the exact tags installed in Ollama (`ollama list`).
+    # Main brain: chat, planning, reasoning, conversation, tool calling.
+    MAIN_MODEL = os.getenv("CHHOTI_DON_MAIN_MODEL", "qwen3.5:latest")
+    # Coding: code generation, code review, debugging, refactoring.
+    CODING_MODEL = os.getenv("CHHOTI_DON_CODING_MODEL", "deepseek-coder-v2:16b-lite-instruct-q4_K_M")
+    # Vision: image understanding, screenshots, PDF image pages, UI analysis.
+    # Uses the dedicated llava vision model (installed as `llava:latest`).
+    # Override with CHHOTI_DON_VISION_MODEL if desired.
+    VISION_MODEL = os.getenv("CHHOTI_DON_VISION_MODEL", "llava:latest")
 
     # API Keys
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

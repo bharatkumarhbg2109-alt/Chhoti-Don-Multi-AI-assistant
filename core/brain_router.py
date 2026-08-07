@@ -19,6 +19,7 @@ from core.brain_registry import (
     BRAINS, get_brain, get_brain_model,
     get_system_prompt, get_temperature, list_brains
 )
+from core.config import Config
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_TIMEOUT = 120
@@ -163,7 +164,7 @@ def route_and_think(
 
     intent = task_type if task_type else detect_intent(user_input)
     brain = get_brain(intent)
-    model = brain.get("model", "mistral:latest")
+    model = brain.get("model", Config.MAIN_MODEL)
     temperature = brain.get("temperature", 0.7)
     system_prompt = system_override or brain.get("system_prompt", "You are a helpful assistant.")
 

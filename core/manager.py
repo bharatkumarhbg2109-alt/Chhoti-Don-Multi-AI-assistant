@@ -495,6 +495,12 @@ class ManagerAgent:
             payload = {"input": task}
             if tool_name == "search":
                 payload = {"query": task}
+            elif tool_name == "web_search":
+                payload = {"query": task}
+            elif tool_name == "open_page":
+                import re
+                match = re.search(r"https?://\S+", task)
+                payload = {"url": match.group(0).rstrip(".,)") if match else ""}
             elif tool_name == "run_python":
                 payload = {"code": task}
 

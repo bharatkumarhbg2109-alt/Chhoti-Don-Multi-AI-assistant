@@ -244,6 +244,11 @@ Explain karo:
                 "model": model,
                 "prompt": prompt,
                 "stream": False,
+                # qwen3.x are "thinking" models: without this they spend the
+                # token budget on hidden reasoning and can return an empty
+                # visible answer. Disabling gives clean, fast replies.
+                # Non-thinking models (e.g. deepseek-coder) ignore this flag.
+                "think": False,
                 "options": {
                     "temperature": temperature,
                     "num_predict": 2048,
@@ -302,7 +307,7 @@ coder, security, analyst
 
 Available tools:
 calculator, run_python, read_file, search,
-generate_code, execute_code, debug_code, explain_code
+web_search, open_page, generate_code, execute_code, debug_code, explain_code
 
 Conversation Context:
 {context}
@@ -404,6 +409,10 @@ JSON FORMAT:
             return "read_file"
         if "run python" in task_lower:
             return "run_python"
+        if re.search(r"https?://\S+", task_lower) and any(word in task_lower for word in ["open page", "read page", "open url", "read url"]):
+            return "open_page"
+        if any(word in task_lower for word in ["web search", "search web", "search online", "latest news"]):
+            return "web_search"
         if "search" in task_lower:
             return "search"
 

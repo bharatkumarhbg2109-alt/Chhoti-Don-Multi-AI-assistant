@@ -31,9 +31,13 @@ def get_capabilities() -> List[Dict]:
     history_ok = _importable("core.history_store", "create_conversation")
     memory_ok = _importable("core.memory", "Memory")
     coding_ok = _importable("tools.registry", "ToolRegistry")
+    vision_ok = _importable("tools.image_analyzer", "analyze_image")
+    web_ok = _importable("browser.guarded", "web_search")
     cyber_ok = _importable("cyber_engine.cyber_controller", "CyberController")
     heal_ok = _importable("cyber_engine.code_intelligence.code_controller", "run_code_intelligence")
-    voice_ok = _importable("voice_assistant")
+    # New local voice package (faster-whisper STT + Piper TTS), wired to the UI
+    # via /api/voice/transcribe and /api/voice/speak.
+    voice_ok = _importable("voice", "VoiceAssistant")
 
     caps: List[Dict] = [
         {
@@ -77,6 +81,26 @@ def get_capabilities() -> List[Dict]:
             "view": "assistant",
         },
         {
+            "id": "vision",
+            "name": "Vision",
+            "available": vision_ok,
+            "category": "Vision",
+            "description": "Understand images locally (qwen3.5 vision). Attach an image or send a file path in chat.",
+            "risk_level": "low",
+            "requires_confirmation": False,
+            "view": "assistant",
+        },
+        {
+            "id": "web_search",
+            "name": "Web Search",
+            "available": web_ok,
+            "category": "Web",
+            "description": "Keyless web search + page reading (guarded). Ask to 'web search ...' or 'open page <url>'.",
+            "risk_level": "low",
+            "requires_confirmation": False,
+            "view": "assistant",
+        },
+        {
             "id": "system_health",
             "name": "System Status",
             "available": True,
@@ -108,16 +132,14 @@ def get_capabilities() -> List[Dict]:
         },
         {
             "id": "voice",
-            "name": "Voice Assistant",
-            # Discovered in the repo (voice_assistant.py / chhoti_don_voice.py) but it is a
-            # standalone microphone/CLI tool with no safe web API boundary — not exposed in the UI.
-            "available": False,
+            "name": "Voice I/O",
+            "available": voice_ok,
             "category": "Voice",
-            "description": "Voice interface exists as a standalone CLI tool; no desktop UI integration yet.",
+            "description": "Local speech-in / speech-out (faster-whisper + Piper). Use the mic button, or run `python -m voice`.",
             "risk_level": "low",
             "requires_confirmation": False,
-            "view": None,
-            "note": "CLI only — run voice_assistant.py directly.",
+            "view": "assistant",
+            "note": "Wired to /api/voice/transcribe and /api/voice/speak.",
         },
     ]
     return caps

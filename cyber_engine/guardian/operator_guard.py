@@ -51,3 +51,19 @@ class OperatorGuard:
         print(f"\n[Guardian] Action '{action_name}' requires approval.")
         decision = input("Approve? (yes/no): ").strip().lower()
         return decision == "yes"
+
+    def assess_action(self, action_name, target=None):
+        """Return a non-mutating Guardian assessment for a proposed action.
+
+        Browser reads are deliberately low-risk, but still pass through the
+        existing Guardian so all executable capabilities have a common audit
+        and confirmation hook.
+        """
+        requires_confirmation = self.requires_approval(action_name)
+        return {
+            "action": action_name,
+            "target": target,
+            "risk_level": "low" if action_name.startswith("web_") else "unknown",
+            "risk_score": 10 if action_name.startswith("web_") else 0,
+            "requires_confirmation": requires_confirmation,
+        }

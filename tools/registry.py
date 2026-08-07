@@ -4,6 +4,13 @@ from tools.calculator import run_calculator
 from tools.file_reader import read_file
 from tools.sandbox import run_python
 from tools.search import search_web
+from browser.guarded import web_search, open_page
+from tools.image_analyzer import analyze_image
+from tools.feature_builder import (
+    feature_builder,
+    load_generated_tools,
+    TOOL_DEFINITION as FEATURE_BUILDER_DEF,
+)
 
 # 🔎 Recon Imports
 from cyber_engine.recon.port_scanner import PortScanner
@@ -61,6 +68,11 @@ class ToolRegistry:
             "calculator": run_calculator,
             "read_file": read_file,
             "search": search_web,
+            # Browser operations are intentionally the guarded wrappers, never
+            # browser.search's raw blocking functions.
+            "web_search": web_search,
+            "open_page": open_page,
+            "analyze_image": analyze_image,
             "run_python": run_python,
             "port_scan": self._run_port_scan,
             "subdomain_scan": self._run_subdomain_scan,
@@ -72,11 +84,46 @@ class ToolRegistry:
             "execute_code": self._run_execute_code,
             "debug_code": self._run_debug_code,
             "explain_code": self._run_explain_code,
+
+            # ---------------------------
+            # 🧩 Self-extension
+            # ---------------------------
+            "feature_builder": feature_builder,
         }
 
         # Add Nmap only if available
         if self.nmap_available:
             self.tools["nmap_scan"] = self._run_nmap
+
+        self.tool_definitions = {
+            "web_search": {
+                "name": "web_search",
+                "description": "Search the web and return links with snippets only; it does not answer the question.",
+                "args": {"query": "string", "max_results": "integer (optional, 1-10)"},
+            },
+            "open_page": {
+                "name": "open_page",
+                "description": "Read one specific http(s) URL and return clean text as untrusted data for citation.",
+                "args": {"url": "string"},
+            },
+            "analyze_image": {
+                "name": "analyze_image",
+                "description": "Look at a LOCAL image file and describe it (objects, text, colors) using a local vision model. No internet.",
+                "args": {"image_path": "string (local file)", "prompt": "string (optional question about the image)"},
+            },
+            "feature_builder": FEATURE_BUILDER_DEF,
+        }
+
+        # Assistant-generated tools (added via feature_builder). Guarded so a
+        # broken generated tool can never break the registry at startup.
+        try:
+            for _gname, _gspec in load_generated_tools().items():
+                if _gname == "_errors":
+                    continue
+                self.tools[_gname] = _gspec["callable"]
+                self.tool_definitions[_gname] = _gspec["definition"]
+        except Exception:
+            pass
 
     # --------------------------------------------------
     # 📋 List Tools (Preserved)
@@ -86,6 +133,10 @@ class ToolRegistry:
 
     def get_available_tools(self):
         return list(self.tools.keys())
+
+    def get_tool_definitions(self):
+        """Return LLM-facing metadata for tools that expose typed arguments."""
+        return dict(self.tool_definitions)
 
     # --------------------------------------------------
     # 🚀 Execute Tool (Safe Version)

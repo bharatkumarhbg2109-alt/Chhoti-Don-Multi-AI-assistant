@@ -48,7 +48,7 @@ DEFAULT_CONFIG = {
     # 🧠 Brain / AI Settings
     # --------------------------------------------------
     "brain": {
-        "default_model": "mistral:latest",
+        "default_model": "qwen3.5:latest",
         "ollama_url": "http://localhost:11434/api/generate",
         "timeout": 120,
         "temperature": 0.7,
@@ -67,6 +67,14 @@ DEFAULT_CONFIG = {
         "rate_limit_window": 60,
         "max_scans_per_window": 5,
         "cooldown_seconds": 120,
+        # Browser policy is kept with the Guardian policy so browser access has
+        # one source of truth instead of a second, competing policy file.
+        "browser": {
+            "blocked_domains": ["localhost", "127.0.0.1", "::1", "169.254.169.254"],
+            "rate_limit_per_min": 5,
+            "max_content_chars": 8000,
+            "require_confirmation": False,
+        },
     },
 
     # --------------------------------------------------

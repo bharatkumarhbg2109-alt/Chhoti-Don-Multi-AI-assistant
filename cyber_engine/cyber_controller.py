@@ -299,7 +299,9 @@ class CyberController:
 
     def calculate_risk(self, severity, confidence=0.8, session_id=None):
         def task():
-            from cyber_engine.intelligence.risk_calculator import calculate_risk, generate_risk_report
+            from cyber_engine.intelligence.risk_calculator import calculate_risk
+
+            risk_result = calculate_risk(severity, confidence)
 
             if session_id:
                 self.session_manager.add_risk_score(session_id, risk_result.get("adjusted_score", 0))
