@@ -1,0 +1,16 @@
+# Chhoti Don — VOICE mode dependencies (local, zero-cost, no API keys).
+# Install:  python -m pip install -r requirements-voice.txt
+# Then download a Piper voice:  python -m voice.download_voice
+#
+# NOTE (Windows / Python 3.13 / RTX 5050 Blackwell):
+#  - GPU STT (device=cuda, float16) needs CUDA 12 + cuDNN 9 runtime libs on PATH.
+#    If CUDA init fails, voice/stt.py auto-falls back to CPU (int8).
+#  - webrtcvad has no 3.13 wheel; webrtcvad-wheels provides one.
+
+faster-whisper>=1.1        # STT (CTranslate2 Whisper; GPU or CPU)
+piper-tts>=1.6             # TTS (OHF-Voice/piper1-gpl, CPU; bundles espeak-ng-data)
+sounddevice>=0.5           # mic capture + speaker playback (PortAudio)
+webrtcvad-wheels>=2.0      # voice-activity detection (prebuilt wheel, imports as webrtcvad)
+soundfile>=0.12            # WAV read/write (verification + file I/O)
+scipy>=1.10                # resample mic audio 48kHz(capture) -> 16kHz(Whisper)
+# onnxruntime and ctranslate2 are pulled in automatically by the above.
