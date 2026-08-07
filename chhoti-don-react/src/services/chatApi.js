@@ -113,19 +113,45 @@ async function request(path, { method = 'GET', body, signal, timeout = QUICK_TIM
  * @param {object} [opts] - { tool, conversationId, isPrivate, persistUser, signal }
  */
 export function sendMessage(message, opts = {}) {
-  const { tool = 'chat', conversationId, isPrivate = false, persistUser = true, signal } = opts;
-  return request('/chat', {
+  const { tool = 'chat', conversationId, isPrivate = false, persistUser = true, image, signal } = opts;
+  const body = {
+    message,
+    tool,
+    conversation_id: conversationId || null,
+    private: isPrivate,
+    persist_user: persistUser,
+  };
+  if (image) body.image = image; // base64/data-URL -> backend routes to vision
+  return request('/chat', { method: 'POST', body, signal, timeout: CHAT_TIMEOUT });
+}
+
+// ── Voice: local STT / TTS (faster-whisper + Piper) ───────────
+/** Send a recorded audio Blob to the backend and get a transcript. */
+export async function transcribeAudio(blob, signal) {
+  const form = new FormData();
+  form.append('audio', blob, 'speech.webm');
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/voice/transcribe`, { method: 'POST', body: form, signal });
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    throw new ApiError('Cannot reach the backend for transcription.', 'network');
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError((data && data.message) || 'Transcription failed', 'server', res.status);
+  return data; // { text, language, confidence, device }
+}
+
+/** Synthesize speech for text; resolves to an audio Blob (audio/wav). */
+export async function speakText(text, signal) {
+  const res = await fetch(`${API_BASE}/voice/speak`, {
     method: 'POST',
-    body: {
-      message,
-      tool,
-      conversation_id: conversationId || null,
-      private: isPrivate,
-      persist_user: persistUser,
-    },
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
     signal,
-    timeout: CHAT_TIMEOUT,
   });
+  if (!res.ok) throw new ApiError('Speech synthesis failed', 'server', res.status);
+  return res.blob();
 }
 
 // ── Health / status / capabilities ────────────────────────────

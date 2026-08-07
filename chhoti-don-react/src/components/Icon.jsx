@@ -22,6 +22,7 @@ const paths = {
   volume: <path d="M5 10v4h3l4 4V6L8 10H5Zm10-1a4 4 0 0 1 0 6m2.5-8.5a8 8 0 0 1 0 11" />,
   logout: <path d="M10 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5m5-4 4-4-4-4m4 4H9" />,
   sun: <path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6 7 7m10 10 1.4 1.4m0-12.8L17 7M7 17l-1.4 1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" />,
+  moon: <path d="M20.7 15.2A8.6 8.6 0 0 1 8.8 3.3 8.8 8.8 0 1 0 20.7 15.2Z" />,
   cpu: <path d="M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m14 0h2M3 15h2m14 0h2M7 7h10v10H7V7Zm3 3h4v4h-4v-4Z" />,
   pulse: <path d="M3 12h4l2 6 4-14 2 8h6" />,
   terminal: <path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm3 4 3 3-3 3m6 0h4" />,

@@ -89,8 +89,8 @@ export default function SystemStatusView({ status, backendOnline, onRefreshStatu
     <div className="mx-auto max-w-3xl">
       <div className="mb-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-2xl border border-rose-200/15 bg-gradient-to-br from-rose-400/20 via-fuchsia-500/15 to-violet-600/20 shadow-brand">
-            <Icon name="cpu" className="h-5 w-5 text-rose-100" />
+          <div className="grid h-10 w-10 place-items-center rounded-2xl border border-brand-200/15 bg-gradient-to-br from-brand-400/20 via-brand-deep-500/15 to-brand-blue-600/20 shadow-brand">
+            <Icon name="cpu" className="h-5 w-5 text-brand-100" />
           </div>
           <div>
             <h2 className="font-display text-base font-semibold text-white">System Status</h2>
@@ -101,7 +101,7 @@ export default function SystemStatusView({ status, backendOnline, onRefreshStatu
           <button
             type="button"
             onClick={handleRefresh}
-            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300 transition hover:border-rose-300/20 hover:bg-rose-300/[0.055] hover:text-rose-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300 transition hover:border-brand-300/20 hover:bg-brand-300/[0.055] hover:text-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
           >
             <Icon name="refresh" className="h-4 w-4" />
             Refresh
@@ -111,7 +111,7 @@ export default function SystemStatusView({ status, backendOnline, onRefreshStatu
             onClick={handleRestart}
             disabled={restarting}
             title={desktop ? 'Restart background services' : 'Available in the desktop app'}
-            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300 transition hover:border-rose-300/20 hover:bg-rose-300/[0.055] hover:text-rose-100 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300 transition hover:border-brand-300/20 hover:bg-brand-300/[0.055] hover:text-brand-100 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
           >
             <Icon name="history" className={`h-4 w-4 ${restarting ? 'animate-orb-spin' : ''}`} />
             Restart services
@@ -180,7 +180,7 @@ export default function SystemStatusView({ status, backendOnline, onRefreshStatu
                 type="button"
                 onClick={() => setLogName(n)}
                 className={`rounded-lg px-2.5 py-1 text-[11px] transition ${
-                  logName === n ? 'bg-rose-400/20 text-rose-100' : 'text-slate-400 hover:text-slate-200'
+                  logName === n ? 'bg-brand-400/20 text-brand-100' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 {n}
@@ -188,7 +188,7 @@ export default function SystemStatusView({ status, backendOnline, onRefreshStatu
             ))}
           </div>
         </div>
-        <div className="scrollbar-subtle max-h-64 overflow-y-auto rounded-2xl border border-white/[0.07] bg-[#08060d]/80 p-3 font-mono text-[11px] leading-5 text-slate-400">
+        <div className="scrollbar-subtle max-h-64 overflow-y-auto rounded-2xl border border-white/[0.07] bg-[#031716]/80 p-3 font-mono text-[11px] leading-5 text-slate-400">
           {logLoading && <p className="text-slate-600">Loading…</p>}
           {!logLoading && logLines.length === 0 && <p className="text-slate-600">No log entries.</p>}
           {!logLoading &&

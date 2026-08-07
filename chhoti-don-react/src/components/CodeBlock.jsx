@@ -33,7 +33,7 @@ export default function CodeBlock({ language = 'text', value = '' }) {
         <button
           type="button"
           onClick={copyCode}
-          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-400 transition duration-200 hover:bg-rose-300/[0.08] hover:text-rose-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-slate-400 transition duration-200 hover:bg-brand-300/[0.08] hover:text-brand-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
           aria-label={copied ? 'Code copied to clipboard' : 'Copy code to clipboard'}
         >
           <Icon name={copied ? 'shield' : 'copy'} className="h-3.5 w-3.5" />

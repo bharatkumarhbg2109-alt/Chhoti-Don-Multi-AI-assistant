@@ -52,8 +52,18 @@ New-Item -ItemType Directory -Force -Path $Root | Out-Null
 foreach ($f in @("app.py", "requirements.txt", "chhoti_don_ui.html")) {
   Copy-Item (Join-Path $ProjectRoot $f) (Join-Path $Root $f) -Force
 }
-foreach ($d in @("core", "cyber_engine", "tools", "chhoti_agents")) {
-  robocopy (Join-Path $ProjectRoot $d) (Join-Path $Root $d) /E /XD "__pycache__" /XF "*.pyc" "*.pyo" /NFL /NDL /NJH /NJS /NP | Out-Null
+# First-party Python packages the backend imports (directly or transitively).
+# NOTE: browser/ is REQUIRED at startup (tools.registry -> browser.guarded);
+# hands/ and voice/ back their respective features. Keep this list in sync with
+# the packages that live at the project root, or the packaged backend will fail
+# with ModuleNotFoundError.
+foreach ($d in @("core", "cyber_engine", "tools", "chhoti_agents", "browser", "hands", "voice")) {
+  $srcDir = Join-Path $ProjectRoot $d
+  if (Test-Path $srcDir -PathType Container) {
+    robocopy $srcDir (Join-Path $Root $d) /E /XD "__pycache__" /XF "*.pyc" "*.pyo" /NFL /NDL /NJH /NJS /NP | Out-Null
+  } else {
+    Write-Host "Skipping missing package: $d"
+  }
 }
 $distSrc = Join-Path $ProjectRoot "chhoti-don-react\dist"
 $distDst = Join-Path $Root "chhoti-don-react\dist"

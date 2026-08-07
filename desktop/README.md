@@ -25,9 +25,9 @@ Node APIs and no arbitrary shell access to the renderer.
 ## Requirements
 
 - **Python 3** on PATH (or a project virtualenv), with `pip install -r ../requirements.txt`.
-- **Ollama** installed with the configured model (`mistral:latest`). If the model
+- **Ollama** installed with the configured model (`qwen3.5:latest`). If the model
   is missing the app still runs (simulated fallback) and shows the exact
-  `ollama pull mistral:latest` command.
+  `ollama pull qwen3.5:latest` command.
 - The React dashboard must be built once: `cd ../chhoti-don-react && npm run build`.
 
 ## Run in development

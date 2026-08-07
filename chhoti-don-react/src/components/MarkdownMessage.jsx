@@ -21,7 +21,7 @@ const components = {
     }
     return (
       <code
-        className="rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 text-[0.85em] text-rose-200"
+        className="rounded-md border border-white/10 bg-white/[0.06] px-1.5 py-0.5 text-[0.85em] text-brand-200"
         {...rest}
       >
         {children}
@@ -33,20 +33,20 @@ const components = {
       {...props}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-rose-300 underline decoration-rose-300/40 underline-offset-2 transition hover:text-rose-200"
+      className="text-brand-300 underline decoration-brand-300/40 underline-offset-2 transition hover:text-brand-200"
     >
       {children}
     </a>
   ),
-  ul: ({ children }) => <ul className="my-2 ml-4 list-disc space-y-1 marker:text-rose-300/60">{children}</ul>,
-  ol: ({ children }) => <ol className="my-2 ml-4 list-decimal space-y-1 marker:text-rose-300/60">{children}</ol>,
+  ul: ({ children }) => <ul className="my-2 ml-4 list-disc space-y-1 marker:text-brand-300/60">{children}</ul>,
+  ol: ({ children }) => <ol className="my-2 ml-4 list-decimal space-y-1 marker:text-brand-300/60">{children}</ol>,
   li: ({ children }) => <li className="leading-6">{children}</li>,
   p: ({ children }) => <p className="my-1.5 leading-6 first:mt-0 last:mb-0">{children}</p>,
   h1: ({ children }) => <h1 className="mb-2 mt-3 text-base font-semibold text-white">{children}</h1>,
   h2: ({ children }) => <h2 className="mb-2 mt-3 text-[15px] font-semibold text-white">{children}</h2>,
   h3: ({ children }) => <h3 className="mb-1.5 mt-2.5 text-sm font-semibold text-slate-100">{children}</h3>,
   blockquote: ({ children }) => (
-    <blockquote className="my-2 border-l-2 border-rose-300/40 pl-3 text-slate-400">{children}</blockquote>
+    <blockquote className="my-2 border-l-2 border-brand-300/40 pl-3 text-slate-400">{children}</blockquote>
   ),
   strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
   hr: () => <hr className="my-3 border-white/10" />,

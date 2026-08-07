@@ -54,19 +54,19 @@ export function ToastProvider({ children }) {
             role="status"
             className={`pointer-events-auto flex w-full items-center gap-2.5 rounded-2xl border px-4 py-2.5 text-[13px] shadow-glass backdrop-blur-2xl animate-message-in ${
               toast.tone === 'error'
-                ? 'border-amber-400/25 bg-amber-500/[0.12] text-amber-100'
-                : 'border-rose-200/15 bg-[#0c0813]/85 text-slate-200'
+                ? 'border-brand-mist-400/25 bg-brand-mist-500/[0.12] text-brand-mist-100'
+                : 'border-brand-200/15 bg-[#032f30]/85 text-slate-200'
             }`}
           >
             <Icon
               name={toast.tone === 'error' ? 'shield' : 'sparkles'}
-              className={`h-4 w-4 shrink-0 ${toast.tone === 'error' ? 'text-amber-300' : 'text-rose-300'}`}
+              className={`h-4 w-4 shrink-0 ${toast.tone === 'error' ? 'text-brand-mist-300' : 'text-brand-300'}`}
             />
             <span className="flex-1">{toast.message}</span>
             <button
               type="button"
               onClick={() => dismiss(toast.id)}
-              className="shrink-0 rounded-lg p-0.5 text-slate-500 transition hover:text-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+              className="shrink-0 rounded-lg p-0.5 text-slate-500 transition hover:text-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
               aria-label="Dismiss notification"
             >
               <Icon name="close" className="h-3.5 w-3.5" />

@@ -74,15 +74,15 @@ export default function Sidebar({
         key={item.view}
         onClick={() => onSelectView(item.view)}
         aria-current={active ? 'page' : undefined}
-        className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition duration-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40 ${
+        className={`group flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-sm transition duration-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40 ${
           active
-            ? 'border border-rose-200/10 bg-gradient-to-r from-rose-400/[0.09] to-fuchsia-500/[0.045] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.05)]'
+            ? 'border border-brand-200/10 bg-gradient-to-r from-brand-400/[0.09] to-brand-deep-500/[0.045] text-white shadow-[inset_0_1px_0_rgba(255,255,255,.05)]'
             : 'border border-transparent text-slate-400 hover:border-white/5 hover:bg-white/[0.035] hover:text-slate-100'
         }`}
       >
-        <Icon name={item.icon} className={`h-[18px] w-[18px] ${active ? 'text-rose-300' : 'group-hover:text-rose-300'}`} />
+        <Icon name={item.icon} className={`h-[18px] w-[18px] ${active ? 'text-brand-300' : 'group-hover:text-brand-300'}`} />
         <span>{item.label}</span>
-        {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-rose-300 shadow-[0_0_12px_rgba(253,164,175,.95)]" />}
+        {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-300 shadow-[0_0_12px_rgba(107,163,190,.95)]" />}
       </button>
     );
   };
@@ -93,7 +93,7 @@ export default function Sidebar({
         type="button"
         aria-label="Close sidebar"
         onClick={onClose}
-        className={`fixed inset-0 z-30 bg-[#050308]/80 backdrop-blur-sm transition-opacity lg:hidden ${
+        className={`fixed inset-0 z-30 bg-[#031716]/80 backdrop-blur-sm transition-opacity lg:hidden ${
           open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
         }`}
       />
@@ -105,10 +105,10 @@ export default function Sidebar({
       >
         <div className="flex items-center justify-between px-2 py-2">
           <div className="flex items-center gap-3">
-            <div className="relative grid h-10 w-10 place-items-center rounded-2xl border border-rose-200/15 bg-gradient-to-br from-rose-400/25 via-fuchsia-500/20 to-violet-600/25 shadow-brand">
-              <Icon name="sparkles" className="h-5 w-5 text-rose-100" />
-              <span className="absolute inset-0 rounded-2xl border border-rose-300/15 animate-pulse-soft" />
-              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-200 shadow-[0_0_12px_rgba(253,230,138,.8)]" />
+            <div className="relative grid h-10 w-10 place-items-center rounded-2xl border border-brand-200/15 bg-gradient-to-br from-brand-400/25 via-brand-deep-500/20 to-brand-blue-600/25 shadow-brand">
+              <Icon name="sparkles" className="h-5 w-5 text-brand-100" />
+              <span className="absolute inset-0 rounded-2xl border border-brand-300/15 animate-pulse-soft" />
+              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-brand-mist-200 shadow-[0_0_12px_rgba(253,230,138,.8)]" />
             </div>
             <div>
               <p className="font-display text-sm font-semibold tracking-[0.15em] text-white">CHHOTI DON</p>
@@ -123,7 +123,7 @@ export default function Sidebar({
         <button
           type="button"
           onClick={onNewConversation}
-          className="group mt-4 flex items-center justify-center gap-2 rounded-2xl border border-rose-300/20 bg-gradient-to-r from-rose-500/20 via-fuchsia-500/15 to-violet-600/20 px-4 py-3 text-sm font-medium text-rose-50 shadow-brand transition duration-300 hover:scale-[1.02] hover:border-rose-200/40 hover:shadow-[0_0_42px_rgba(244,63,94,.20)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+          className="interactive group mt-4 flex items-center justify-center gap-2 rounded-2xl border border-brand-300/20 bg-gradient-to-r from-brand-500/20 via-brand-deep-500/15 to-brand-blue-600/20 px-4 py-3 text-sm font-medium text-brand-50 shadow-brand hover:border-brand-200/40 hover:shadow-[0_0_42px_rgba(12,150,156,.20)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
         >
           <Icon name="plus" className="h-4 w-4 transition-transform duration-300 group-hover:rotate-90" />
           New conversation
@@ -150,7 +150,7 @@ export default function Sidebar({
                 onSearch?.('');
               }
             }}
-            className="text-slate-500 transition hover:text-rose-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+            className="text-slate-500 transition hover:text-brand-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
             aria-label={searchOpen ? 'Hide conversation search' : 'Search conversations'}
             aria-expanded={searchOpen}
           >
@@ -165,7 +165,7 @@ export default function Sidebar({
               value={search}
               onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Search title or message…"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-rose-300/30"
+              className="w-full rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-brand-300/30"
               aria-label="Search conversations"
             />
           </div>
@@ -185,20 +185,20 @@ export default function Sidebar({
                 key={conversation.id}
                 className={`group flex items-center gap-2 rounded-2xl border pr-1.5 transition duration-300 ${
                   active
-                    ? 'border-rose-200/15 bg-rose-300/[0.06]'
-                    : 'border-transparent hover:border-rose-200/[0.07] hover:bg-rose-300/[0.035]'
+                    ? 'border-brand-200/15 bg-brand-300/[0.06]'
+                    : 'border-transparent hover:border-brand-200/[0.07] hover:bg-brand-300/[0.035]'
                 }`}
               >
                 <button
                   type="button"
                   onClick={() => onSelectConversation(conversation.id)}
                   aria-current={active ? 'true' : undefined}
-                  className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-3 py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+                  className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-3 py-2.5 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
                 >
                   <span
                     className={`h-8 w-1 rounded-full ${
                       active
-                        ? 'bg-gradient-to-b from-rose-300 via-fuchsia-400 to-violet-500'
+                        ? 'bg-gradient-to-b from-brand-300 via-brand-deep-400 to-brand-blue-500'
                         : 'bg-white/5 group-hover:bg-white/10'
                     }`}
                   />
@@ -216,7 +216,7 @@ export default function Sidebar({
                   <button
                     type="button"
                     onClick={() => onRenameConversation?.(conversation.id)}
-                    className="grid h-7 w-7 place-items-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-rose-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+                    className="grid h-7 w-7 place-items-center rounded-lg text-slate-500 transition hover:bg-white/[0.06] hover:text-brand-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
                     aria-label={`Rename ${conversation.title}`}
                   >
                     <Icon name="edit" className="h-3.5 w-3.5" />
@@ -224,7 +224,7 @@ export default function Sidebar({
                   <button
                     type="button"
                     onClick={() => onDeleteConversation?.(conversation.id)}
-                    className="grid h-7 w-7 place-items-center rounded-lg text-slate-500 transition hover:bg-amber-300/[0.12] hover:text-amber-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300/40"
+                    className="grid h-7 w-7 place-items-center rounded-lg text-slate-500 transition hover:bg-brand-mist-300/[0.12] hover:text-brand-mist-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-mist-300/40"
                     aria-label={`Delete ${conversation.title}`}
                   >
                     <Icon name="trash" className="h-3.5 w-3.5" />
@@ -235,11 +235,11 @@ export default function Sidebar({
           })}
         </div>
 
-        <div className="relative mt-3 rounded-2xl border border-rose-200/10 bg-gradient-to-br from-white/[0.045] to-rose-400/[0.025] p-3" ref={menuRef}>
+        <div className="relative mt-3 rounded-2xl border border-brand-200/10 bg-gradient-to-br from-white/[0.045] to-brand-400/[0.025] p-3" ref={menuRef}>
           <div className="flex items-center gap-3">
-            <div className="relative grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-rose-400/35 via-fuchsia-500/25 to-amber-300/20 text-sm font-semibold text-rose-50">
+            <div className="relative grid h-10 w-10 place-items-center rounded-2xl bg-gradient-to-br from-brand-400/35 via-brand-deep-500/25 to-brand-mist-300/20 text-sm font-semibold text-brand-50">
               BK
-              <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-[#0b0710] bg-rose-300 shadow-[0_0_10px_rgba(253,164,175,.75)]" />
+              <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-[#031716] bg-brand-300 shadow-[0_0_10px_rgba(107,163,190,.75)]" />
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium text-white">Bharat Kumar</p>
@@ -248,7 +248,7 @@ export default function Sidebar({
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
-              className="text-slate-500 transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+              className="text-slate-500 transition hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
               aria-label="Account options"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
@@ -260,7 +260,7 @@ export default function Sidebar({
           {menuOpen && (
             <div
               role="menu"
-              className="absolute bottom-[calc(100%+8px)] right-2 w-48 overflow-hidden rounded-2xl border border-white/10 bg-[#0c0813]/95 p-1 shadow-glass backdrop-blur-2xl"
+              className="absolute bottom-[calc(100%+8px)] right-2 w-48 overflow-hidden rounded-2xl border border-white/10 bg-[#032f30]/95 p-1 shadow-glass backdrop-blur-2xl"
             >
               <button
                 type="button"

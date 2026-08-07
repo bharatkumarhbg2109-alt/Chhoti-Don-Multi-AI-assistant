@@ -43,7 +43,7 @@ export function deriveAiStatus(status, backendOnline) {
 
 export const TONE_DOT = {
   ok: 'bg-emerald-300 shadow-[0_0_10px_rgba(110,231,183,.7)]',
-  warn: 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,.7)]',
-  error: 'bg-rose-400 shadow-[0_0_10px_rgba(251,113,133,.7)]',
+  warn: 'bg-brand-mist-400 shadow-[0_0_10px_rgba(251,191,36,.7)]',
+  error: 'bg-brand-400 shadow-[0_0_10px_rgba(12,150,156,.7)]',
   muted: 'bg-slate-500',
 };

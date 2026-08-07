@@ -22,7 +22,7 @@ const OLLAMA_TAGS_URL = `${OLLAMA_HOST.replace(/\/$/, '')}/api/tags`;
 
 // The configured local model. Mirrors core/config.py's LOCAL_MODEL default so
 // the shell never guesses a random model.
-const OLLAMA_MODEL = process.env.CHHOTI_DON_OLLAMA_MODEL || 'mistral:latest';
+const OLLAMA_MODEL = process.env.CHHOTI_DON_OLLAMA_MODEL || 'qwen3.5:latest';
 
 /** Project root that holds app.py / core / chhoti-don-react/dist. */
 function projectRoot() {

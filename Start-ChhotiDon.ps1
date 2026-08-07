@@ -10,7 +10,7 @@ $FrontendDir = Join-Path $ProjectRoot "chhoti-don-react"
 $BackendUrl = "http://127.0.0.1:8000/api/health"
 $FrontendUrl = "http://127.0.0.1:5173"
 $OllamaUrl = "http://127.0.0.1:11434/api/tags"
-$RequiredModel = if ($env:CHHOTI_DON_OLLAMA_MODEL) { $env:CHHOTI_DON_OLLAMA_MODEL } else { "mistral:latest" }
+$RequiredModel = if ($env:CHHOTI_DON_OLLAMA_MODEL) { $env:CHHOTI_DON_OLLAMA_MODEL } else { "qwen3.5:latest" }
 
 New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
 $LauncherLog = Join-Path $RuntimeDir "launcher.log"

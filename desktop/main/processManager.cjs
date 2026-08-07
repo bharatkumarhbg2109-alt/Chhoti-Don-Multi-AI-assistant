@@ -320,6 +320,24 @@ function forceKillTree(pid) {
   });
 }
 
+/**
+ * Sweep every Ollama process — the `ollama serve` server plus any model-runner
+ * children it spawned — by image name. On Windows a graceful kill of the parent
+ * `ollama serve` PID leaves its runner children alive (holding GPU/RAM), so a
+ * tree/image sweep is required to fully stop it. This also stops an Ollama the
+ * app merely reused, matching the "stop the app → stop all services" lifecycle
+ * (opt out with the keepOllama preference).
+ */
+function killOllamaTree() {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      execFile('taskkill', ['/IM', 'ollama.exe', '/T', '/F'], () => resolve());
+    } else {
+      execFile('pkill', ['-f', 'ollama'], () => resolve());
+    }
+  });
+}
+
 async function stopOne(name, { graceMs = 4000 } = {}) {
   const s = state[name];
   if (!s || !s.owned || !s.pid) {
@@ -371,6 +389,15 @@ async function stopOwned({ keepOllama = false } = {}) {
   await stopOne('backend');
   if (!keepOllama) {
     await stopOne('ollama');
+    // Graceful parent-kill can orphan Ollama's model-runner children, and a
+    // reused (external) server is never "owned"; sweep the whole image so the
+    // GPU/RAM is actually released when the app quits.
+    log('Sweeping any remaining Ollama processes.');
+    await killOllamaTree();
+    state.ollama.child = null;
+    state.ollama.owned = false;
+    state.ollama.pid = null;
+    removePid('ollama');
   } else if (state.ollama.owned) {
     log('Keeping Ollama running per user preference.');
   }
@@ -401,6 +428,7 @@ module.exports = {
   writeProcessMetadata,
   cleanupStaleProcesses,
   stopOwned,
+  killOllamaTree,
   inspectOllama,
   cleanupStalePids,
   ownsOllama: () => state.ollama.owned,

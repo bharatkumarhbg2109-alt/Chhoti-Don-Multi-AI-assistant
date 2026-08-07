@@ -6,8 +6,18 @@
 
 :root {
   color-scheme: dark;
+  --app-background: #031716;
+  --panel-background: rgba(255, 255, 255, 0.035);
+  --panel-border: rgba(255, 255, 255, 0.1);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --app-background: #e8f2f4;
+  --panel-background: rgba(255, 255, 255, 0.76);
+  --panel-border: rgba(39, 77, 96, 0.16);
 }
 
 * {
@@ -15,7 +25,7 @@
 }
 
 html {
-  background: #050308;
+  background: var(--app-background);
 }
 
 html,
@@ -27,7 +37,7 @@ body {
   margin: 0;
   min-width: 320px;
   overflow: hidden; /* the app manages its own internal scrolling */
-  background: #050308;
+  background: var(--app-background);
 }
 
 #root {
@@ -38,6 +48,44 @@ body {
 .app-shell {
   height: 100vh;
   height: 100dvh;
+}
+
+/* A compact light theme override keeps the visual language intact without
+   duplicating Tailwind classes across every component. */
+:root[data-theme='light'] .app-shell {
+  color: #032f30;
+}
+
+:root[data-theme='light'] .glass-panel {
+  border-color: var(--panel-border);
+  background-color: var(--panel-background);
+  background-image: linear-gradient(145deg, rgba(255, 255, 255, .94), rgba(211, 235, 237, .7) 52%, rgba(107, 163, 190, .25));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 22px 70px rgba(39, 77, 96, .12);
+}
+
+:root[data-theme='light'] .app-shell .bg-\[\#050308\],
+:root[data-theme='light'] .app-shell .bg-\[\#09060f\],
+:root[data-theme='light'] .app-shell .bg-\[\#0c0813\] {
+  background-color: rgba(255, 255, 255, .78) !important;
+}
+
+:root[data-theme='light'] .app-shell .text-white,
+:root[data-theme='light'] .app-shell .text-slate-100,
+:root[data-theme='light'] .app-shell .text-slate-200,
+:root[data-theme='light'] .app-shell .text-slate-300 {
+  color: #2c2232 !important;
+}
+
+:root[data-theme='light'] .app-shell .text-slate-400,
+:root[data-theme='light'] .app-shell .text-slate-500,
+:root[data-theme='light'] .app-shell .text-slate-600 {
+  color: #746778 !important;
+}
+
+:root[data-theme='light'] .app-shell .border-white\/10,
+:root[data-theme='light'] .app-shell .border-white\/\[0\.06\],
+:root[data-theme='light'] .app-shell .border-white\/\[0\.07\] {
+  border-color: rgba(39, 77, 96, .12) !important;
 }
 
 button,
@@ -93,19 +141,26 @@ html.modal-open .cursor-trail-dot {
 @layer components {
   .glass-panel {
     @apply border border-white/10 bg-white/[0.035] shadow-glass backdrop-blur-2xl;
-    background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.044), rgba(244, 63, 94, 0.016) 48%, rgba(168, 85, 247, 0.018));
+    background-image: linear-gradient(145deg, rgba(255, 255, 255, 0.044), rgba(12, 150, 156, 0.016) 48%, rgba(107, 163, 190, 0.018));
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.05),
-      inset 0 -1px 0 rgba(244, 63, 94, 0.025),
+      inset 0 -1px 0 rgba(12, 150, 156, 0.025),
       0 26px 95px rgba(0, 0, 0, 0.46);
   }
 
+  .interactive {
+    transition: transform 150ms cubic-bezier(.22, 1, .36, 1), border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+  }
+
+  .interactive:hover { transform: translateY(-1px); }
+  .interactive:active { transform: scale(.985); }
+
   .icon-button {
-    @apply grid h-9 w-9 place-items-center rounded-xl border border-transparent text-slate-400 transition duration-300 hover:scale-105 hover:border-rose-200/10 hover:bg-rose-300/[0.055] hover:text-rose-100;
+    @apply grid h-9 w-9 place-items-center rounded-xl border border-transparent text-slate-400 transition duration-300 hover:scale-105 hover:border-brand-200/10 hover:bg-brand-300/[0.055] hover:text-brand-100;
   }
 
   .message-action {
-    @apply grid h-6 w-6 place-items-center rounded-lg text-slate-600 transition duration-200 hover:bg-rose-300/[0.055] hover:text-rose-200;
+    @apply grid h-6 w-6 place-items-center rounded-lg text-slate-600 transition duration-200 hover:bg-brand-300/[0.055] hover:text-brand-200;
   }
 
   .cursor-core,
@@ -118,23 +173,23 @@ html.modal-open .cursor-trail-dot {
   }
 
   .cursor-core {
-    background: rgba(255, 228, 230, 0.96);
+    background: rgba(226, 245, 246, 0.96);
     box-shadow:
-      0 0 15px rgba(253, 164, 175, 0.95),
-      0 0 38px rgba(217, 70, 239, 0.6);
+      0 0 15px rgba(107, 163, 190, 0.95),
+      0 0 38px rgba(12, 150, 156, 0.6);
   }
 
   .cursor-trail-dot {
-    border: 1px solid rgba(253, 164, 175, 0.3);
-    background: rgba(244, 63, 94, 0.08);
-    box-shadow: 0 0 17px rgba(217, 70, 239, 0.22);
+    border: 1px solid rgba(107, 163, 190, 0.3);
+    background: rgba(12, 150, 156, 0.08);
+    box-shadow: 0 0 17px rgba(12, 150, 156, 0.22);
   }
 }
 
 .bg-grid {
   background-image:
-    linear-gradient(rgba(251, 207, 232, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(251, 207, 232, 0.055) 1px, transparent 1px);
+      linear-gradient(rgba(107, 163, 190, 0.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(107, 163, 190, 0.055) 1px, transparent 1px);
   background-size: 46px 46px;
   mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.82), transparent 92%);
 }
@@ -185,13 +240,13 @@ html.modal-open .cursor-trail-dot {
 }
 
 .composer-glow {
-  background: linear-gradient(100deg, rgba(251, 113, 133, 0.58), rgba(217, 70, 239, 0.48), rgba(139, 92, 246, 0.4));
+  background: linear-gradient(100deg, rgba(12, 150, 156, 0.58), rgba(10, 112, 117, 0.48), rgba(107, 163, 190, 0.4));
 }
 
 .composer:focus-within {
   box-shadow:
-    0 0 0 1px rgba(253, 164, 175, 0.07),
-    0 18px 72px rgba(190, 24, 93, 0.13);
+    0 0 0 1px rgba(107, 163, 190, 0.07),
+    0 18px 72px rgba(10, 112, 117, 0.13);
 }
 
 .composer-glow:has(+ .composer:focus-within) {
@@ -202,7 +257,7 @@ html.modal-open .cursor-trail-dot {
    only to real scroll containers (message list, sidebar list, modal body). */
 .scrollbar-subtle {
   scrollbar-width: thin;
-  scrollbar-color: rgba(244, 114, 182, 0.32) rgba(255, 255, 255, 0.04);
+  scrollbar-color: rgba(12, 150, 156, 0.32) rgba(255, 255, 255, 0.04);
 }
 
 .scrollbar-subtle::-webkit-scrollbar {
@@ -217,13 +272,13 @@ html.modal-open .cursor-trail-dot {
 
 .scrollbar-subtle::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: linear-gradient(180deg, rgba(251, 113, 133, 0.38), rgba(217, 70, 239, 0.34));
+  background: linear-gradient(180deg, rgba(12, 150, 156, 0.38), rgba(10, 112, 117, 0.34));
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 .scrollbar-subtle::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, rgba(251, 113, 133, 0.6), rgba(217, 70, 239, 0.55));
+  background: linear-gradient(180deg, rgba(12, 150, 156, 0.6), rgba(10, 112, 117, 0.55));
   background-clip: padding-box;
 }
 

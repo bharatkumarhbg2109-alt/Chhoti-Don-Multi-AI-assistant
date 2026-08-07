@@ -11,18 +11,18 @@ export default function EmptyState({ backendOnline, prompts = [], onPick }) {
     <div className="flex flex-col items-center text-center">
       <AiOrb compact />
 
-      <div className="mt-5 flex items-center gap-2 rounded-full border border-rose-200/10 bg-gradient-to-r from-white/[0.04] to-rose-400/[0.025] px-3 py-1.5 backdrop-blur-xl">
+      <div className="mt-5 flex items-center gap-2 rounded-full border border-brand-200/10 bg-gradient-to-r from-white/[0.04] to-brand-400/[0.025] px-3 py-1.5 backdrop-blur-xl">
         <span className="relative flex h-2 w-2">
           <span
             className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-55 ${
-              backendOnline === false ? 'bg-amber-400' : 'bg-rose-300'
+              backendOnline === false ? 'bg-brand-mist-400' : 'bg-brand-300'
             }`}
           />
           <span
             className={`relative inline-flex h-2 w-2 rounded-full ${
               backendOnline === false
-                ? 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,.7)]'
-                : 'bg-rose-200 shadow-[0_0_10px_rgba(253,164,175,.7)]'
+                ? 'bg-brand-mist-400 shadow-[0_0_10px_rgba(251,191,36,.7)]'
+                : 'bg-brand-200 shadow-[0_0_10px_rgba(107,163,190,.7)]'
             }`}
           />
         </span>
@@ -31,7 +31,7 @@ export default function EmptyState({ backendOnline, prompts = [], onPick }) {
         </span>
       </div>
 
-      <h2 className="font-display mt-4 bg-gradient-to-r from-white via-rose-100 to-fuchsia-200 bg-clip-text text-2xl font-semibold tracking-tight text-transparent sm:text-3xl">
+      <h2 className="font-display mt-4 bg-gradient-to-r from-white via-brand-100 to-brand-deep-200 bg-clip-text text-2xl font-semibold tracking-tight text-transparent sm:text-3xl">
         Your intelligence. Your command.
       </h2>
       <p className="mt-2 max-w-xl text-xs leading-5 text-slate-500 sm:text-sm">
@@ -45,9 +45,9 @@ export default function EmptyState({ backendOnline, prompts = [], onPick }) {
             key={idea}
             onClick={() => onPick(idea)}
             title="Add this prompt to the composer"
-            className="group flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.035] px-3 py-2 text-[11px] text-slate-400 backdrop-blur-xl transition duration-300 hover:scale-[1.02] hover:border-rose-300/20 hover:bg-rose-300/[0.055] hover:text-rose-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+            className="group flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.035] px-3 py-2 text-[11px] text-slate-400 backdrop-blur-xl transition duration-300 hover:scale-[1.02] hover:border-brand-300/20 hover:bg-brand-300/[0.055] hover:text-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
           >
-            <Icon name="sparkles" className="h-3.5 w-3.5 text-fuchsia-300 transition group-hover:text-rose-300" />
+            <Icon name="sparkles" className="h-3.5 w-3.5 text-brand-deep-300 transition group-hover:text-brand-300" />
             {idea}
           </button>
         ))}

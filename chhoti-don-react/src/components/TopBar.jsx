@@ -20,6 +20,7 @@ export default function TopBar({
   onTogglePrivate,
   onOpenSettings,
   onThemeClick,
+  theme = 'dark',
 }) {
   const meta = VIEW_META[currentView] || VIEW_META.assistant;
   const status = aiStatus || { label: 'Checking…', tone: 'muted' };
@@ -60,17 +61,17 @@ export default function TopBar({
           onClick={onTogglePrivate}
           aria-pressed={privateMode}
           title={privateMode ? 'Private mode on — new messages are not saved locally' : 'Private mode off'}
-          className={`hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] transition md:flex focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40 ${
+          className={`hidden items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] transition md:flex focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40 ${
             privateMode
-              ? 'border-rose-300/30 bg-rose-400/15 text-rose-100'
+              ? 'border-brand-300/30 bg-brand-400/15 text-brand-100'
               : 'border-white/10 bg-white/[0.035] text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Icon name="shield" className={`h-3.5 w-3.5 ${privateMode ? 'text-rose-300' : ''}`} />
+          <Icon name="shield" className={`h-3.5 w-3.5 ${privateMode ? 'text-brand-300' : ''}`} />
           Private mode{privateMode ? ' · on' : ''}
         </button>
-        <button type="button" onClick={onThemeClick} className="icon-button" aria-label="Toggle appearance">
-          <Icon name="sun" className="h-[18px] w-[18px]" />
+        <button type="button" onClick={onThemeClick} className="icon-button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} appearance`}>
+          <Icon name={theme === 'dark' ? 'sun' : 'moon'} className="h-[18px] w-[18px]" />
         </button>
         <button type="button" onClick={onOpenSettings} className="icon-button" aria-label="Settings">
           <Icon name="settings" className="h-[18px] w-[18px]" />

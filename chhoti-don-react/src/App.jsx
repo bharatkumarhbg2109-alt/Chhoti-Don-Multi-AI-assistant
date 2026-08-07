@@ -28,6 +28,7 @@ const promptIdeas = [
 const STREAM_CHUNK = 3;
 const STREAM_DELAY = 16;
 const MOTION_KEY = 'chhoti-don:reduceMotion:v1';
+const THEME_KEY = 'chhoti-don:theme:v1';
 
 const osReducedMotion = () =>
   typeof window !== 'undefined' &&
@@ -72,6 +73,15 @@ function App() {
       return false;
     }
   });
+  const [theme, setTheme] = useState(() => {
+    try {
+      const stored = localStorage.getItem(THEME_KEY);
+      if (stored === 'light' || stored === 'dark') return stored;
+    } catch {
+      // Fall through to the system preference.
+    }
+    return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  });
 
   const chatEndRef = useRef(null);
   const scrollElRef = useRef(null);
@@ -87,6 +97,32 @@ function App() {
   useEffect(() => {
     reduceMotionRef.current = reduceMotion;
   }, [reduceMotion]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch {
+      /* ignore unavailable storage */
+    }
+  }, [theme]);
+
+  useEffect(() => {
+    const handleShortcut = (event) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        handleNewConversation();
+      }
+      if (event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setView('assistant');
+        requestAnimationFrame(() => composerRef.current?.focus?.());
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, []);
 
   const evalNearBottom = useCallback(() => {
     const el = scrollElRef.current;
@@ -260,7 +296,7 @@ function App() {
     streamTimerRef.current = window.setTimeout(step, STREAM_DELAY);
   };
 
-  const runAssistant = async (userText, wasOffline, persistUser) => {
+  const runAssistant = async (userText, wasOffline, persistUser, image = null) => {
     if (!userText) return;
     inFlightRef.current = true;
     setThinking(true);
@@ -274,6 +310,7 @@ function App() {
         conversationId: convId,
         isPrivate: privateMode,
         persistUser,
+        image,
         signal: controller.signal,
       });
       setActiveMessages((current) => current.filter((m) => !m.isError));
@@ -317,6 +354,18 @@ function App() {
     ]);
     setMessage('');
     runAssistant(content, wasOffline, true);
+  };
+
+  const submitImage = (dataUrl, filename) => {
+    if (inFlightRef.current || !dataUrl) return;
+    const prompt = message.trim();
+    nearBottomRef.current = true;
+    setActiveMessages((current) => [
+      ...current.filter((m) => !m.isError),
+      { id: nextId(), role: 'user', text: `🖼️ ${filename}${prompt ? ` — ${prompt}` : ''}`, timestamp: 'Now' },
+    ]);
+    setMessage('');
+    runAssistant(prompt || 'Describe this image in detail.', backendOnline === false, true, dataUrl);
   };
 
   const handleRetry = () => {
@@ -414,7 +463,7 @@ function App() {
   const hasConversation = messages.length > 0 || Boolean(streamingMsg) || thinking;
 
   return (
-    <div className="app-shell relative overflow-hidden bg-[#050308] text-slate-100 selection:bg-rose-300/25 selection:text-rose-50">
+    <div className="app-shell relative overflow-hidden bg-[#031716] text-slate-100 selection:bg-brand-300/25 selection:text-brand-50">
       <AmbientBackground />
       <CursorTrail reduceMotion={reduceMotion} suppressed={settingsOpen} />
 
@@ -447,7 +496,8 @@ function App() {
               notify(next ? 'Private mode on — new messages stay in memory only.' : 'Private mode off — conversations are saved.');
             }}
             onOpenSettings={() => setSettingsOpen(true)}
-            onThemeClick={() => notify('Light theme is coming soon.')}
+            theme={theme}
+            onThemeClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
           />
 
           <section className="relative flex min-h-0 flex-1 flex-col">
@@ -511,7 +561,7 @@ function App() {
                 type="button"
                 onClick={() => scrollToBottom(true)}
                 aria-label="Jump to latest message"
-                className="absolute bottom-28 right-5 z-20 flex items-center gap-1.5 rounded-full border border-rose-300/25 bg-[#0c0813]/90 px-3 py-1.5 text-xs text-rose-100 shadow-brand backdrop-blur-xl transition hover:border-rose-200/50 hover:bg-rose-400/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40 sm:right-8 lg:right-12"
+                className="absolute bottom-28 right-5 z-20 flex items-center gap-1.5 rounded-full border border-brand-300/25 bg-[#032f30]/90 px-3 py-1.5 text-xs text-brand-100 shadow-brand backdrop-blur-xl transition hover:border-brand-200/50 hover:bg-brand-400/15 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40 sm:right-8 lg:right-12"
               >
                 <Icon name="chevron" className="h-4 w-4 rotate-90" />
                 Jump to latest
@@ -520,11 +570,12 @@ function App() {
 
             {view === 'assistant' && (
               <div className="relative shrink-0 px-3 pb-3 sm:px-6 sm:pb-5 lg:px-10">
-                <div className="pointer-events-none absolute inset-x-0 -top-16 h-20 bg-gradient-to-t from-[#07040b]/85 to-transparent" />
+                <div className="pointer-events-none absolute inset-x-0 -top-16 h-20 bg-gradient-to-t from-[#031716]/85 to-transparent" />
                 <ChatComposer
                   value={message}
                   onChange={setMessage}
                   onSubmit={() => submitMessage()}
+                  onAttachImage={submitImage}
                   onStop={handleStop}
                   busy={busy}
                   disabled={busy}
@@ -545,6 +596,8 @@ function App() {
         onRefreshStatus={() => loadStatus()}
         reduceMotion={reduceMotion}
         onToggleReduceMotion={setReduceMotion}
+        theme={theme}
+        onToggleTheme={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
         onClearMemory={handleClearMemory}
       />
     </div>

@@ -51,8 +51,8 @@ export default function CyberView() {
     <div className="mx-auto max-w-3xl">
       <div className="mb-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-2xl border border-rose-200/15 bg-gradient-to-br from-rose-400/20 via-fuchsia-500/15 to-violet-600/20 shadow-brand">
-            <Icon name="shield" className="h-5 w-5 text-rose-100" />
+          <div className="grid h-10 w-10 place-items-center rounded-2xl border border-brand-200/15 bg-gradient-to-br from-brand-400/20 via-brand-deep-500/15 to-brand-blue-600/20 shadow-brand">
+            <Icon name="shield" className="h-5 w-5 text-brand-100" />
           </div>
           <div>
             <h2 className="font-display text-base font-semibold text-white">Cyber Engine</h2>
@@ -62,7 +62,7 @@ export default function CyberView() {
         <button
           type="button"
           onClick={load}
-          className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300 transition hover:border-rose-300/20 hover:bg-rose-300/[0.055] hover:text-rose-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+          className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-2 text-xs text-slate-300 transition hover:border-brand-300/20 hover:bg-brand-300/[0.055] hover:text-brand-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
         >
           <Icon name="refresh" className="h-4 w-4" />
           Refresh
@@ -78,10 +78,10 @@ export default function CyberView() {
       )}
 
       {!loading && error && (
-        <div className="rounded-2xl border border-amber-400/25 bg-amber-500/[0.1] p-5 text-center">
-          <Icon name="shield" className="mx-auto h-6 w-6 text-amber-300" />
-          <p className="mt-2 text-sm text-amber-100">{error}</p>
-          <button type="button" onClick={load} className="mt-3 rounded-xl border border-amber-400/30 px-3 py-1.5 text-xs text-amber-100 transition hover:bg-amber-300/[0.12]">
+        <div className="rounded-2xl border border-brand-mist-400/25 bg-brand-mist-500/[0.1] p-5 text-center">
+          <Icon name="shield" className="mx-auto h-6 w-6 text-brand-mist-300" />
+          <p className="mt-2 text-sm text-brand-mist-100">{error}</p>
+          <button type="button" onClick={load} className="mt-3 rounded-xl border border-brand-mist-400/30 px-3 py-1.5 text-xs text-brand-mist-100 transition hover:bg-brand-mist-300/[0.12]">
             Try again
           </button>
         </div>
@@ -92,8 +92,8 @@ export default function CyberView() {
           <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
             <div className="flex items-center justify-between">
               <p className="text-xs font-medium text-slate-300">Engine</p>
-              <span className={`flex items-center gap-2 text-xs ${status?.available ? 'text-emerald-200' : 'text-amber-200'}`}>
-                <span className={`h-2 w-2 rounded-full ${status?.available ? 'bg-emerald-300' : 'bg-amber-300'}`} />
+              <span className={`flex items-center gap-2 text-xs ${status?.available ? 'text-emerald-200' : 'text-brand-mist-200'}`}>
+                <span className={`h-2 w-2 rounded-full ${status?.available ? 'bg-emerald-300' : 'bg-brand-mist-300'}`} />
                 {status?.available ? 'Ready' : 'Unavailable'}
               </span>
             </div>
@@ -137,28 +137,28 @@ export default function CyberView() {
           )}
 
           {/* Safe active action: loopback-only port check */}
-          <div className="rounded-2xl border border-rose-300/15 bg-gradient-to-br from-rose-400/[0.06] to-transparent p-4">
+          <div className="rounded-2xl border border-brand-300/15 bg-gradient-to-br from-brand-400/[0.06] to-transparent p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-medium text-white">Loopback port check</p>
                 <p className="mt-0.5 text-[11px] leading-4 text-slate-400">
-                  Checks common ports on <span className="text-rose-200">127.0.0.1</span> only. Requires confirmation; no external targets are permitted.
+                  Checks common ports on <span className="text-brand-200">127.0.0.1</span> only. Requires confirmation; no external targets are permitted.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={runLoopbackScan}
                 disabled={scanning}
-                className="shrink-0 rounded-xl border border-rose-300/25 bg-rose-400/15 px-3 py-2 text-xs text-rose-50 transition hover:bg-rose-400/25 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+                className="shrink-0 rounded-xl border border-brand-300/25 bg-brand-400/15 px-3 py-2 text-xs text-brand-50 transition hover:bg-brand-400/25 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
               >
                 {scanning ? 'Scanning…' : 'Run check'}
               </button>
             </div>
 
-            {scanError && <p className="mt-3 rounded-lg border border-amber-400/25 bg-amber-500/[0.1] px-3 py-2 text-[11px] text-amber-100">{scanError}</p>}
+            {scanError && <p className="mt-3 rounded-lg border border-brand-mist-400/25 bg-brand-mist-500/[0.1] px-3 py-2 text-[11px] text-brand-mist-100">{scanError}</p>}
 
             {scanResult && (
-              <div className="mt-3 rounded-xl border border-white/[0.07] bg-[#08060d]/60 p-3">
+              <div className="mt-3 rounded-xl border border-white/[0.07] bg-[#031716]/60 p-3">
                 <p className="text-[11px] text-slate-500">
                   Target {scanResult.target} · checked {scanResult.checked_ports?.length} ports
                 </p>
@@ -183,11 +183,11 @@ export default function CyberView() {
               <ul className="space-y-2">
                 {caps.capabilities.map((c) => (
                   <li key={c.id} className="flex items-start gap-3 rounded-xl border border-white/[0.05] bg-white/[0.02] px-3 py-2">
-                    <Icon name={c.active ? 'pulse' : 'shield'} className="mt-0.5 h-4 w-4 text-rose-200" />
+                    <Icon name={c.active ? 'pulse' : 'shield'} className="mt-0.5 h-4 w-4 text-brand-200" />
                     <div className="min-w-0">
                       <p className="text-xs text-slate-200">
                         {c.name}
-                        {c.active && <span className="ml-2 rounded bg-rose-400/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-rose-200">active</span>}
+                        {c.active && <span className="ml-2 rounded bg-brand-400/15 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-brand-200">active</span>}
                         {!c.active && <span className="ml-2 rounded bg-white/5 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-400">read-only</span>}
                       </p>
                       <p className="mt-0.5 text-[11px] leading-4 text-slate-500">{c.description}</p>

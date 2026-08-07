@@ -25,8 +25,8 @@ function Toggle({ checked, onChange, label }) {
       role="switch"
       aria-checked={checked}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40 ${
-        checked ? 'border-rose-300/40 bg-rose-400/30' : 'border-white/10 bg-white/[0.06]'
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40 ${
+        checked ? 'border-brand-300/40 bg-brand-400/30' : 'border-white/10 bg-white/[0.06]'
       }`}
       aria-label={label}
     >
@@ -49,6 +49,8 @@ export default function SettingsModal({
   onRefreshStatus,
   reduceMotion,
   onToggleReduceMotion,
+  theme = 'dark',
+  onToggleTheme,
   onClearMemory,
 }) {
   const closeRef = useRef(null);
@@ -126,15 +128,15 @@ export default function SettingsModal({
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Settings">
-      <button type="button" aria-label="Close settings" onClick={onClose} className="absolute inset-0 bg-[#050308]/80 backdrop-blur-sm" />
+      <button type="button" aria-label="Close settings" onClick={onClose} className="absolute inset-0 bg-[#031716]/80 backdrop-blur-sm" />
       <div
         ref={panelRef}
         className="glass-panel relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-[28px]"
       >
         <div className="flex shrink-0 items-center justify-between border-b border-white/[0.06] px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 place-items-center rounded-xl border border-rose-200/15 bg-gradient-to-br from-rose-400/20 via-fuchsia-500/15 to-violet-600/20">
-              <Icon name="settings" className="h-5 w-5 text-rose-100" />
+            <div className="grid h-9 w-9 place-items-center rounded-xl border border-brand-200/15 bg-gradient-to-br from-brand-400/20 via-brand-deep-500/15 to-brand-blue-600/20">
+              <Icon name="settings" className="h-5 w-5 text-brand-100" />
             </div>
             <h2 className="font-display text-base font-semibold text-white">Settings</h2>
           </div>
@@ -150,7 +152,7 @@ export default function SettingsModal({
               <button
                 type="button"
                 onClick={onRefreshStatus}
-                className="flex items-center gap-1.5 text-[11px] text-slate-400 transition hover:text-rose-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+                className="flex items-center gap-1.5 text-[11px] text-slate-400 transition hover:text-brand-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
               >
                 <Icon name="refresh" className="h-3.5 w-3.5" />
                 Refresh
@@ -171,12 +173,21 @@ export default function SettingsModal({
 
           <section>
             <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Preferences</h3>
-            <div className="flex items-center justify-between rounded-2xl border border-white/[0.07] bg-white/[0.025] px-4 py-3">
-              <div>
-                <p className="text-xs font-medium text-slate-300">Reduce motion</p>
-                <p className="mt-0.5 text-[11px] text-slate-500">Minimise animations and instant-reveal responses.</p>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between rounded-2xl border border-white/[0.07] bg-white/[0.025] px-4 py-3">
+                <div>
+                  <p className="text-xs font-medium text-slate-300">Appearance</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">Use the {theme === 'dark' ? 'dark' : 'light'} interface.</p>
+                </div>
+                <Toggle checked={theme === 'light'} onChange={onToggleTheme} label="Use light appearance" />
               </div>
-              <Toggle checked={reduceMotion} onChange={onToggleReduceMotion} label="Reduce motion" />
+              <div className="flex items-center justify-between rounded-2xl border border-white/[0.07] bg-white/[0.025] px-4 py-3">
+                <div>
+                  <p className="text-xs font-medium text-slate-300">Reduce motion</p>
+                  <p className="mt-0.5 text-[11px] text-slate-500">Minimise animations and instant-reveal responses.</p>
+                </div>
+                <Toggle checked={reduceMotion} onChange={onToggleReduceMotion} label="Reduce motion" />
+              </div>
             </div>
           </section>
 
@@ -199,7 +210,7 @@ export default function SettingsModal({
                   <button
                     type="button"
                     onClick={handleRestart}
-                    className="shrink-0 rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-200 transition hover:border-rose-300/25 hover:bg-rose-300/[0.08] focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+                    className="shrink-0 rounded-xl border border-white/10 px-3 py-1.5 text-xs text-slate-200 transition hover:border-brand-300/25 hover:bg-brand-300/[0.08] focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
                   >
                     Restart
                   </button>
@@ -210,15 +221,15 @@ export default function SettingsModal({
 
           <section>
             <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">Data</h3>
-            <div className="flex items-center justify-between rounded-2xl border border-amber-400/20 bg-amber-500/[0.06] px-4 py-3">
+            <div className="flex items-center justify-between rounded-2xl border border-brand-mist-400/20 bg-brand-mist-500/[0.06] px-4 py-3">
               <div>
-                <p className="text-xs font-medium text-amber-100">Clear short-term memory</p>
-                <p className="mt-0.5 text-[11px] text-amber-200/70">Clears the assistant’s recent context. Saved conversations are kept.</p>
+                <p className="text-xs font-medium text-brand-mist-100">Clear short-term memory</p>
+                <p className="mt-0.5 text-[11px] text-brand-mist-200/70">Clears the assistant’s recent context. Saved conversations are kept.</p>
               </div>
               <button
                 type="button"
                 onClick={onClearMemory}
-                className="shrink-0 rounded-xl border border-amber-400/30 px-3 py-1.5 text-xs text-amber-100 transition hover:bg-amber-300/[0.12] focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300/40"
+                className="shrink-0 rounded-xl border border-brand-mist-400/30 px-3 py-1.5 text-xs text-brand-mist-100 transition hover:bg-brand-mist-300/[0.12] focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-mist-300/40"
               >
                 Clear
               </button>

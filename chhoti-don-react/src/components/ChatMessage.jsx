@@ -24,10 +24,10 @@ export default function ChatMessage({ role, children, timestamp, isError = false
   };
 
   const bubbleClass = isUser
-    ? 'rounded-tr-md border-rose-300/15 bg-gradient-to-br from-rose-500/20 via-fuchsia-500/13 to-violet-600/16 text-slate-100'
+    ? 'rounded-tr-md border-brand-300/15 bg-gradient-to-br from-brand-500/20 via-brand-deep-500/13 to-brand-blue-600/16 text-slate-100'
     : isError
-      ? 'rounded-tl-md border-amber-400/30 bg-gradient-to-br from-amber-500/[0.12] to-rose-500/[0.08] text-amber-100'
-      : 'rounded-tl-md border-white/10 bg-gradient-to-br from-white/[0.052] to-rose-300/[0.022] text-slate-300 backdrop-blur-xl';
+      ? 'rounded-tl-md border-brand-mist-400/30 bg-gradient-to-br from-brand-mist-500/[0.12] to-brand-500/[0.08] text-brand-mist-100'
+      : 'rounded-tl-md border-white/10 bg-gradient-to-br from-white/[0.052] to-brand-300/[0.022] text-slate-300 backdrop-blur-xl';
 
   return (
     <article className={`group flex animate-message-in gap-3 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -35,11 +35,11 @@ export default function ChatMessage({ role, children, timestamp, isError = false
         <div
           className={`mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-xl border shadow-brand ${
             isError
-              ? 'border-amber-400/25 bg-gradient-to-br from-amber-500/25 to-rose-500/20'
-              : 'border-rose-300/15 bg-gradient-to-br from-rose-400/20 via-fuchsia-500/15 to-violet-600/20'
+              ? 'border-brand-mist-400/25 bg-gradient-to-br from-brand-mist-500/25 to-brand-500/20'
+              : 'border-brand-300/15 bg-gradient-to-br from-brand-400/20 via-brand-deep-500/15 to-brand-blue-600/20'
           }`}
         >
-          <Icon name={isError ? 'shield' : 'sparkles'} className="h-4 w-4 text-rose-100" />
+          <Icon name={isError ? 'shield' : 'sparkles'} className="h-4 w-4 text-brand-100" />
         </div>
       )}
 
@@ -62,7 +62,7 @@ export default function ChatMessage({ role, children, timestamp, isError = false
                 <button
                   type="button"
                   onClick={onRetry}
-                  className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-amber-200 transition hover:bg-amber-300/[0.12] hover:text-amber-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-300/40"
+                  className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-brand-mist-200 transition hover:bg-brand-mist-300/[0.12] hover:text-brand-mist-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-mist-300/40"
                 >
                   <Icon name="history" className="h-3.5 w-3.5" />
                   Retry
@@ -72,7 +72,7 @@ export default function ChatMessage({ role, children, timestamp, isError = false
                 <button
                   type="button"
                   onClick={onDismiss}
-                  className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-slate-500 transition hover:bg-white/[0.05] hover:text-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-300/40"
+                  className="flex items-center gap-1 rounded-lg px-2 py-0.5 text-slate-500 transition hover:bg-white/[0.05] hover:text-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40"
                   aria-label="Dismiss error"
                 >
                   <Icon name="close" className="h-3.5 w-3.5" />
@@ -102,14 +102,14 @@ export default function ChatMessage({ role, children, timestamp, isError = false
               >
                 <Icon name="volume" className="h-3.5 w-3.5" />
               </button>
-              {copied && <span className="ml-1 text-rose-300">Copied</span>}
+              {copied && <span className="ml-1 text-brand-300">Copied</span>}
             </div>
           )}
         </div>
       </div>
 
       {isUser && (
-        <div className="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-rose-200/10 bg-gradient-to-br from-white/[0.09] to-rose-400/[0.08] text-[10px] font-semibold text-white">
+        <div className="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-brand-200/10 bg-gradient-to-br from-white/[0.09] to-brand-400/[0.08] text-[10px] font-semibold text-white">
           BK
         </div>
       )}
