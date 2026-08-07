@@ -506,14 +506,36 @@ class ManagerAgent:
 
             return self.safe_tool_execute(tool_name, payload, user_lang)
 
-        response = self.brain.think(task)
+        # ── RAG grounding (merged ai_knowledge) ───────────────────
+        # Pull fresh, relevant chunks from the shared ai_knowledge collection and
+        # inject them as a SYSTEM prompt before generating. This runs AFTER the
+        # guardian/safety gate (safety_policy.evaluate already ran in app.py
+        # before brain_task) and ONLY on this free-form conversation path — not
+        # coding, vision, or tool calls. Fail-open: no relevant context or any
+        # error leaves the original behavior untouched.
+        rag_sources: list = []
+        try:
+            from core.knowledge import retrieve_context, build_grounded_system
+            _context, rag_sources = retrieve_context(task)
+        except Exception:
+            _context, rag_sources = "", []
 
-        return {
+        if _context:
+            from core.brain_registry import get_system_prompt
+            grounded_system = build_grounded_system(get_system_prompt("default"), _context)
+            response = self.brain.think(task, system_override=grounded_system)
+        else:
+            response = self.brain.think(task)
+
+        result = {
             "agent": "Brain",
             "language": user_lang,
-            "thinking": "LLM reasoning",
+            "thinking": "LLM reasoning" + (" + ai_knowledge RAG" if rag_sources else ""),
             "output": response,
         }
+        if rag_sources:
+            result["sources"] = rag_sources
+        return result
 
     # --------------------------------------------------
     # Autonomous Mode (Preserved + Coding Tools Added)

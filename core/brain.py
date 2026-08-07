@@ -252,6 +252,10 @@ Explain karo:
                 "options": {
                     "temperature": temperature,
                     "num_predict": 2048,
+                    # Cap the context window so qwen3.5 (whose default context is
+                    # enormous -> ~16GB) fits an 8GB GPU instead of being
+                    # CPU-offloaded and slow. Tunable via CHHOTI_DON_OLLAMA_NUM_CTX.
+                    "num_ctx": int(os.getenv("CHHOTI_DON_OLLAMA_NUM_CTX", "8192")),
                 }
             }
 

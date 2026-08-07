@@ -1,0 +1,18 @@
+# Auto-Updating AI Knowledge Pipeline — Python dependencies.
+# Pinned to versions verified working on Python 3.13 (Windows/macOS/Linux).
+#
+# NOTE: Ollama itself is NOT a pip package. Install it separately from
+#       https://ollama.com and pull the models (see README.md).
+#
+# Windows without a C++ compiler? chromadb's native dep (chroma-hnswlib) must
+# come as a prebuilt wheel. Install with:
+#     pip install --only-binary=:all: -r requirements.txt
+
+chromadb==1.5.9
+feedparser==6.0.11
+fastapi==0.115.6
+uvicorn==0.34.0
+APScheduler==3.11.0
+trafilatura==2.1.0
+requests==2.32.3
+pydantic==2.10.3

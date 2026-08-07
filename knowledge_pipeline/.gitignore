@@ -1,0 +1,10 @@
+# Runtime artifacts created when the pipeline runs — never commit these.
+__pycache__/
+*.py[cod]
+
+# ChromaDB on-disk vector store (config.DB_PATH default: ./chroma_db)
+chroma_db/
+
+# Incremental-fetch state (config.LAST_RUN_FILE default: last_run.json)
+last_run.json
+last_run.json.tmp
