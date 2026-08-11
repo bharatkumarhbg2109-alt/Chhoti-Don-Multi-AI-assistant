@@ -4,6 +4,7 @@ Central registry for all AI brain configurations.
 Phase 2.2 - Full Upgrade
 """
 
+import os
 from typing import Dict, List, Optional, Optional
 
 from core.model_router import resolve_model
@@ -166,6 +167,35 @@ BRAINS: Dict[str, Dict] = {
         "capabilities": ["general", "help", "answer"],
         "priority": 99,
     },
+    # Dedicated, fast, token-cheap brain for the READ-ONLY browser agent loop
+    # (Phase 2). Structured JSON action selection ONLY — never user-facing prose,
+    # so it deliberately does NOT get the Hinglish / web-tool suffixes (see
+    # get_system_prompt). Reuses the main model (qwen2.5:7b-instruct is not
+    # installed); the loop calls it with think:false + a low num_predict so many
+    # steps stay fast and cheap on the 8GB GPU. Override the tag with
+    # CHHOTI_DON_NAV_MODEL.
+    "navigation": {
+        "model": os.environ.get("CHHOTI_DON_NAV_MODEL", _MAIN),
+        "temperature": 0.1,
+        "max_tokens": 256,
+        "system_prompt": (
+            "You are a READ-ONLY web research agent. Reach the user's GOAL by "
+            "choosing ONE next action per step. You can ONLY read the web — you "
+            "cannot click, type, log in, buy, or change anything.\n"
+            "Available actions:\n"
+            "  search      args: {\"query\": str}          -> web results (links+snippets)\n"
+            "  navigate    args: {\"url\": str}            -> page title + final URL\n"
+            "  read_page   args: {\"url\": str}            -> clean readable page text\n"
+            "  get_content args: {\"url\": str}            -> accessibility outline\n"
+            "  finish      args: {\"answer\": str}         -> stop and give the answer\n"
+            "Use search then read at least one result before you finish; do not "
+            "answer from memory alone. Respond with a SINGLE JSON object and "
+            "NOTHING else, e.g.: {\"thought\":\"...\",\"tool\":\"search\",\"args\":{\"query\":\"...\"}}"
+        ),
+        "description": "Read-only browser agent action planner (structured JSON).",
+        "capabilities": ["plan", "browse", "route"],
+        "priority": 10,
+    },
 }
 
 BRAIN_ALIASES: Dict[str, str] = {
@@ -196,10 +226,15 @@ def get_system_prompt(brain_type: str) -> str:
     canonical = BRAIN_ALIASES.get(brain_type, brain_type)
     prompt = get_brain(brain_type).get("system_prompt", "You are a helpful assistant.")
     # Chatty Hinglish everywhere the user sees prose — but NOT for the structured
-    # brains: planner returns strict JSON and reviewer returns APPROVED/patches,
-    # so a conversational directive would corrupt their output.
-    if canonical not in ("planner", "reviewer"):
+    # brains: planner returns strict JSON, reviewer returns APPROVED/patches, and
+    # navigation returns strict JSON actions, so a conversational directive would
+    # corrupt their output.
+    if canonical not in ("planner", "reviewer", "navigation"):
         prompt += HINGLISH_STYLE
+    # The navigation brain drives the read-only browser agent loop; it must emit
+    # ONLY a JSON action, so it gets neither the Hinglish nor the web-tool suffix.
+    if canonical == "navigation":
+        return prompt
     # This applies across model providers because all use get_system_prompt.
     return prompt + WEB_TOOL_INSTRUCTIONS
 

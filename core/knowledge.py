@@ -26,10 +26,16 @@ logger = logging.getLogger("chhoti_don.knowledge")
 # Make the sibling knowledge_pipeline package importable (flat sibling imports:
 # it does `import config` / `import store`). Anchored to the repo root so CWD
 # doesn't matter.
+#
+# APPEND (not insert-at-0): these flat names (config/store/retriever/novelty)
+# exist ONLY inside knowledge_pipeline, so appending resolves them fine while
+# NOT shadowing root-level modules that share a name — notably the root Flask
+# `app.py` vs knowledge_pipeline's FastAPI `app.py`. Inserting at position 0
+# made a later `import app` resolve to the wrong module once this ran.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _KP_DIR = os.path.join(_REPO_ROOT, "knowledge_pipeline")
 if os.path.isdir(_KP_DIR) and _KP_DIR not in sys.path:
-    sys.path.insert(0, _KP_DIR)
+    sys.path.append(_KP_DIR)
 
 # How many chunks to pull, and the cosine-distance ceiling for "relevant enough".
 # cosine distance is in [0, 2]; smaller = closer. Calibrated against the arXiv

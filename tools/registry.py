@@ -81,6 +81,8 @@ class ToolRegistry:
             "browser_navigate": browser_navigate,
             "browser_read": browser_read,
             "browser_get_content": browser_get_content,
+            # Phase 2: read-only multi-step research agent (guarded browser loop).
+            "browser_research": self._run_browser_research,
             "analyze_image": analyze_image,
             "run_python": run_python,
             "port_scan": self._run_port_scan,
@@ -132,6 +134,14 @@ class ToolRegistry:
                 "name": "browser_get_content",
                 "description": "Render a page in a REAL headed browser and return a compact markdown outline of its accessibility tree (untrusted). Read-only.",
                 "args": {"url": "string"},
+            },
+            "browser_research": {
+                "name": "browser_research",
+                "description": ("Autonomous READ-ONLY multi-step research: given a goal, a fast local "
+                                "model plans and runs several guarded search/navigate/read steps and "
+                                "returns a synthesized answer. No clicking/typing. Use for 'open the "
+                                "browser and find out X'."),
+                "args": {"goal": "string", "max_steps": "integer (optional)"},
             },
             "analyze_image": {
                 "name": "analyze_image",
@@ -237,6 +247,35 @@ class ToolRegistry:
             raise ValueError("Domain is required for subdomain_scan")
 
         return self.subdomain_scanner.scan(domain)
+
+    # ==================================================
+    # 🌐 BROWSER RESEARCH AGENT (Phase 2 — READ-ONLY)
+    # ==================================================
+    def _run_browser_research(self, input_data):
+        """Run the read-only browser research agent. Requires a brain for the
+        navigation model; every browser action goes through the guardian gate."""
+        goal = str(input_data.get("goal") or input_data.get("input") or "").strip()
+        if not goal:
+            return {"status": "error", "marker": "EMPTY_GOAL",
+                    "message": "A research goal is required."}
+        if self.brain is None:
+            return {"status": "error", "marker": "NO_BRAIN",
+                    "message": "Navigation brain unavailable."}
+        from browser.agent import run_research
+
+        def _think(prompt):
+            return self.brain.think_fast(prompt, brain_type="navigation")
+
+        def _synth(prompt):
+            return self.brain.think_fast(
+                prompt, brain_type="navigation", num_predict=400,
+                system_prompt="You are a concise research assistant. Answer in plain text.")
+
+        kw = {}
+        if input_data.get("max_steps") is not None:
+            kw["max_steps"] = int(input_data["max_steps"])
+        res = run_research(goal, think_fn=_think, synth_fn=_synth, **kw)
+        return {"status": "success", **res}
 
     # ==================================================
     # 💻 CODING ENGINE WRAPPERS

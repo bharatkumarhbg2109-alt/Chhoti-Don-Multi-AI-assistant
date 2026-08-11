@@ -37,6 +37,9 @@ def get_capabilities() -> List[Dict]:
     # guarded wrappers import AND the optional playwright package is present.
     browser_ok = (_importable("browser.guarded", "browser_read")
                   and _importable("playwright"))
+    # Phase 2: read-only multi-step research agent loop.
+    research_ok = (_importable("browser.agent", "run_research")
+                   and _importable("playwright"))
     cyber_ok = _importable("cyber_engine.cyber_controller", "CyberController")
     heal_ok = _importable("cyber_engine.code_intelligence.code_controller", "run_code_intelligence")
     # New local voice package (faster-whisper STT + Piper TTS), wired to the UI
@@ -113,6 +116,19 @@ def get_capabilities() -> List[Dict]:
                             "real Chromium window, navigates and extracts readable content. "
                             "Phase 1 is READ-ONLY (no clicking/typing/logins). Complements the "
                             "keyless static web search."),
+            "risk_level": "low",
+            "requires_confirmation": False,
+            "view": "assistant",
+        },
+        {
+            "id": "browser_research",
+            "name": "Browser Research Agent (read-only)",
+            "available": research_ok,
+            "category": "Web",
+            "description": ("Autonomous multi-step READ-ONLY web research: given a goal, a fast "
+                            "local model plans and runs several guarded search/navigate/read steps "
+                            "and returns a synthesized answer. Triggered by 'open the browser and "
+                            "find out X'. No clicking/typing/logins."),
             "risk_level": "low",
             "requires_confirmation": False,
             "view": "assistant",

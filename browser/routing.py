@@ -40,6 +40,29 @@ def user_requested_browser(text: str) -> bool:
     return any(phrase in t for phrase in _EXPLICIT_BROWSER_PHRASES)
 
 
+# Phase 2 chat trigger: fire the multi-step research agent ONLY on an explicit
+# request to use the browser. Deliberately STRICT so ordinary chat never diverts —
+# these exact phrases don't occur in normal questions. (Distinct from
+# user_requested_browser, which is broader and includes "render it".)
+_RESEARCH_TRIGGERS = (
+    "open the browser", "open a browser", "use the browser to", "using the browser",
+    "browser me khol", "browser mein khol", "browser kholo", "browser kholke",
+    "browser khol ke", "browser se dhoond", "browser se search", "browser se research",
+    "research using the browser", "browse the web for", "browser se pata",
+)
+
+
+def is_browser_research_request(text: str) -> bool:
+    """True only when the user EXPLICITLY asks to use the browser to research.
+
+    This is the documented, opt-in trigger for the Phase-2 agent loop. It is
+    intentionally narrow: ordinary chat/coding/RAG messages never match, so the
+    default chat path is byte-for-byte unchanged for everything else.
+    """
+    t = (text or "").lower()
+    return any(phrase in t for phrase in _RESEARCH_TRIGGERS)
+
+
 def should_use_browser(text: str = "", static_result: dict | None = None) -> bool:
     """Encode the routing rule. Returns True when the Playwright browser should be
     used instead of the cheap static path.

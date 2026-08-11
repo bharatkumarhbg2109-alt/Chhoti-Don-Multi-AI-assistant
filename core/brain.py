@@ -130,6 +130,62 @@ class Brain:
             return f"Brain Error: {str(e)}"
 
     # ==================================================
+    # STREAMING THINK (token-by-token)
+    # ==================================================
+    def think_stream(self, prompt, brain_type: str = None, system_override: str = None):
+        """
+        Streaming counterpart of think(): a generator that yields response text
+        fragments as the model produces them. Behaviour, model, params, system
+        prompt and MEMORY updates are identical to think() — only delivery is
+        chunked. Only local (Ollama) mode truly token-streams; simulation and
+        api modes yield the full reply once (local is the target of this path).
+        """
+        self.memory.add("user", prompt)
+
+        active_brain = brain_type or self._current_brain_type or "default"
+        if system_override:
+            system_prompt = system_override
+        else:
+            system_prompt = get_system_prompt(active_brain)
+        model = get_brain_model(active_brain)
+        temperature = get_temperature(active_brain)
+
+        if self.mode == "local":
+            parts = []
+            for chunk in self.local_think_stream(
+                prompt, model=model, system_prompt=system_prompt, temperature=temperature
+            ):
+                parts.append(chunk)
+                yield chunk
+            self.memory.add("assistant", "".join(parts))
+            return
+
+        if self.mode == "simulation":
+            reply = self.simulated_response(prompt)
+            self.memory.add("assistant", reply)
+            yield reply
+            return
+
+        # API Mode (OpenAI) — single yield; keeps memory consistent with think().
+        try:
+            messages = self.memory.get_context()
+            if system_prompt:
+                messages = [{"role": "system", "content": system_prompt}] + [
+                    m for m in messages if m.get("role") != "system"
+                ]
+            from openai import OpenAI
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=temperature,
+            )
+            reply = response.choices[0].message.content
+        except Exception as e:
+            reply = f"Brain Error: {str(e)}"
+        self.memory.add("assistant", reply)
+        yield reply
+
+    # ==================================================
     # CODING-SPECIFIC THINK
     # ==================================================
     def think_code(self, prompt: str, language: str = "python") -> str:
@@ -249,13 +305,18 @@ Explain karo:
                 # visible answer. Disabling gives clean, fast replies.
                 # Non-thinking models (e.g. deepseek-coder) ignore this flag.
                 "think": False,
+                # Keep the model resident in VRAM indefinitely so it doesn't
+                # cold-reload (~15-18s) after Ollama's default 5-min idle unload.
+                # qwen3.5 (~5.5GB) + nomic-embed (~0.3GB) coexist in 8GB.
+                "keep_alive": -1,
                 "options": {
                     "temperature": temperature,
                     "num_predict": 2048,
                     # Cap the context window so qwen3.5 (whose default context is
                     # enormous -> ~16GB) fits an 8GB GPU instead of being
-                    # CPU-offloaded and slow. Tunable via CHHOTI_DON_OLLAMA_NUM_CTX.
-                    "num_ctx": int(os.getenv("CHHOTI_DON_OLLAMA_NUM_CTX", "8192")),
+                    # CPU-offloaded and slow. 4096 keeps the whole model on-GPU
+                    # (no CPU spill) for faster eval. Tunable via CHHOTI_DON_OLLAMA_NUM_CTX.
+                    "num_ctx": int(os.getenv("CHHOTI_DON_OLLAMA_NUM_CTX", "4096")),
                 }
             }
 
@@ -280,6 +341,129 @@ Explain karo:
             return f"❌ Ollama timeout ({OLLAMA_TIMEOUT}s) — model slow hai ya GPU busy hai."
         except Exception as e:
             return f"Local Brain Error: {str(e)}"
+
+    # ==================================================
+    # LOCAL OLLAMA MODE — Streaming (token-by-token)
+    # ==================================================
+    def local_think_stream(
+        self,
+        prompt: str,
+        model: str = None,
+        system_prompt: str = "",
+        temperature: float = 0.7
+    ):
+        """
+        Streaming variant of local_think(): identical Ollama payload but with
+        "stream": True, yielding response text fragments as they arrive. Every
+        generation parameter is the SAME as local_think() — keep_alive:-1,
+        num_ctx:4096, num_predict:2048, think:False, temperature — so the answer
+        content is unchanged; only delivery is chunked. Errors are yielded as a
+        single text chunk (mirroring local_think's error-string returns).
+        """
+        if not model:
+            model = get_brain_model(self._current_brain_type or "default")
+
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": True,          # <-- the only functional difference vs local_think
+            "think": False,
+            "keep_alive": -1,
+            "options": {
+                "temperature": temperature,
+                "num_predict": 2048,
+                "num_ctx": int(os.getenv("CHHOTI_DON_OLLAMA_NUM_CTX", "4096")),
+            }
+        }
+        if system_prompt:
+            payload["system"] = system_prompt
+
+        try:
+            with requests.post(
+                OLLAMA_URL, json=payload, timeout=OLLAMA_TIMEOUT, stream=True
+            ) as response:
+                if response.status_code != 200:
+                    yield f"Ollama HTTP Error {response.status_code}: {response.text[:200]}"
+                    return
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except Exception:
+                        continue
+                    chunk = data.get("response")
+                    if chunk:
+                        yield chunk
+                    if data.get("done"):
+                        break
+        except requests.exceptions.ConnectionError:
+            yield "❌ Ollama server nahi mila! Terminal mein 'ollama serve' run karo."
+        except requests.exceptions.Timeout:
+            yield f"❌ Ollama timeout ({OLLAMA_TIMEOUT}s) — model slow hai ya GPU busy hai."
+        except Exception as e:
+            yield f"Local Brain Error: {str(e)}"
+
+    # ==================================================
+    # FAST STRUCTURED THINK (browser agent loop — Phase 2)
+    # ==================================================
+    def think_fast(self, prompt: str, brain_type: str = "navigation",
+                   num_predict: int = 256, temperature: float = None,
+                   system_prompt: str = None) -> str:
+        """Low-latency, token-cheap, structured call for the READ-ONLY browser
+        agent loop. Uses the dedicated navigation brain, think:False, a SMALL
+        num_predict, and does NOT write to conversation memory (the agent loop is
+        stateless per step and must not pollute chat memory). Returns raw text.
+
+        This is deliberately separate from think()/local_think so ordinary chat,
+        streaming and memory behavior are completely untouched.
+        """
+        model = get_brain_model(brain_type)
+        if temperature is None:
+            temperature = get_temperature(brain_type)
+        if system_prompt is None:
+            system_prompt = get_system_prompt(brain_type)
+
+        if self.mode == "simulation":
+            return self.simulated_response(prompt)
+
+        if self.mode == "local":
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "think": False,           # never the slow thinking path in the loop
+                "keep_alive": -1,
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": num_predict,   # small: one JSON action per step
+                    "num_ctx": int(os.getenv("CHHOTI_DON_OLLAMA_NUM_CTX", "4096")),
+                },
+            }
+            if system_prompt:
+                payload["system"] = system_prompt
+            try:
+                r = requests.post(OLLAMA_URL, json=payload, timeout=OLLAMA_TIMEOUT)
+                if r.status_code == 200:
+                    return (r.json().get("response", "") or "").strip()
+                return ""
+            except Exception:
+                return ""
+
+        # API (OpenAI) mode — single small completion, no memory writes.
+        try:
+            from openai import OpenAI
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini", messages=messages, temperature=temperature,
+                max_tokens=num_predict,
+            )
+            return (response.choices[0].message.content or "").strip()
+        except Exception:
+            return ""
 
     # ==================================================
     # SET ACTIVE BRAIN TYPE

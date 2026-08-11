@@ -44,3 +44,14 @@ NAV_TIMEOUT_MS = int(os.environ.get("CHHOTI_DON_BROWSER_NAV_TIMEOUT_MS", "20000"
 NETWORK_IDLE_TIMEOUT_MS = int(os.environ.get("CHHOTI_DON_BROWSER_IDLE_TIMEOUT_MS", "6000"))
 # Hard ceiling for one whole navigate→read→close operation.
 OPERATION_TIMEOUT_MS = int(os.environ.get("CHHOTI_DON_BROWSER_OP_TIMEOUT_MS", "35000"))
+
+
+# ── Research agent loop (Phase 2: read-only plan→act→observe) ─────────────────
+# HARD step cap so the loop can never run away. Observations are truncated to a
+# small char budget and only the last AGENT_MAX_OBS are kept, so each step's
+# context stays ~<=2k tokens (protects 8GB VRAM + latency). See browser/agent.py.
+AGENT_MAX_STEPS = int(os.environ.get("CHHOTI_DON_AGENT_MAX_STEPS", "8"))
+AGENT_OBS_CHARS = int(os.environ.get("CHHOTI_DON_AGENT_OBS_CHARS", "1200"))
+AGENT_MAX_OBS = int(os.environ.get("CHHOTI_DON_AGENT_MAX_OBS", "6"))
+AGENT_NUM_PREDICT = int(os.environ.get("CHHOTI_DON_AGENT_NUM_PREDICT", "256"))
+AGENT_MAX_PARSE_RETRIES = int(os.environ.get("CHHOTI_DON_AGENT_MAX_PARSE_RETRIES", "3"))

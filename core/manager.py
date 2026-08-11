@@ -19,6 +19,34 @@ from core.brain_router import route_task, detect_intent, route_coding_tool
 from core.local_model_engine import execute
 
 
+def _should_run_rag(task: str) -> bool:
+    """
+    Decide whether a message is worth the RAG embed + Chroma query.
+
+    The ai_knowledge corpus is arXiv AI/ML research, so RAG only ever helps
+    knowledge/technical questions — never plain chit-chat. This cheap keyword
+    check (detect_intent/detect_task, ~0ms) lets pure conversational messages
+    (greetings, thanks, mood: "hi", "kaise ho", "good morning") SKIP the ~763ms
+    embed entirely and go straight to generation.
+
+    CONSERVATIVE BY DESIGN: RAG is skipped ONLY when the message is classified as
+    conversational chit-chat by intent OR task. Everything else — research,
+    analytics, and the catch-all "default" (any question that didn't match the
+    chit-chat keywords) — still runs RAG. A missed factual context is worse than
+    a wasted embed, so when in doubt we RUN RAG. This changes no answer content:
+    a chit-chat message never had a chunk within the 0.45 distance gate, so it
+    was never injected — we only avoid paying for the embed that returns nothing.
+    """
+    try:
+        intent = detect_intent(task)
+        task_type = detect_task(task)
+    except Exception:
+        return True  # any classifier hiccup -> fail safe, run RAG
+    if intent == "conversation" or task_type == "conversation":
+        return False
+    return True
+
+
 def _as_text(value) -> str:
     """Coerce an arbitrary pipeline value into a safe text task string."""
     if value is None:
@@ -471,6 +499,17 @@ class ManagerAgent:
 
         user_lang = detect_language(task)
 
+        # Phase-2 opt-in: an EXPLICIT "open the browser and research X" request runs
+        # the read-only multi-step browser agent. The trigger is deliberately narrow
+        # (see browser.routing.is_browser_research_request) so every ordinary chat /
+        # coding / RAG message falls straight through to the unchanged logic below.
+        try:
+            from browser.routing import is_browser_research_request
+            if is_browser_research_request(task):
+                return self.research_task(task)
+        except Exception:
+            pass  # fail-open: never let the browser layer break ordinary chat
+
         try:
             tool_name = self.brain.decide_tool(task)
         except Exception:
@@ -513,12 +552,19 @@ class ManagerAgent:
         # before brain_task) and ONLY on this free-form conversation path — not
         # coding, vision, or tool calls. Fail-open: no relevant context or any
         # error leaves the original behavior untouched.
+        #
+        # Intent gate: skip the embed + Chroma query for plain chit-chat, which
+        # never clears the 0.45 distance gate anyway (see _should_run_rag). This
+        # only avoids wasted work — it never changes an answer's content.
         rag_sources: list = []
-        try:
-            from core.knowledge import retrieve_context, build_grounded_system
-            _context, rag_sources = retrieve_context(task)
-        except Exception:
-            _context, rag_sources = "", []
+        if _should_run_rag(task):
+            try:
+                from core.knowledge import retrieve_context, build_grounded_system
+                _context, rag_sources = retrieve_context(task)
+            except Exception:
+                _context, rag_sources = "", []
+        else:
+            _context = ""
 
         if _context:
             from core.brain_registry import get_system_prompt
@@ -536,6 +582,81 @@ class ManagerAgent:
         if rag_sources:
             result["sources"] = rag_sources
         return result
+
+    # --------------------------------------------------
+    # Browser research agent (Phase 2 — READ-ONLY multi-step loop)
+    # --------------------------------------------------
+    def research_task(self, goal: str, max_steps: int = None) -> dict:
+        """Run the read-only browser research agent for ``goal`` and return a
+        normal assistant result. The loop uses the dedicated 'navigation' brain
+        (think_fast: think:false, small num_predict), and every browser action
+        it takes is executed through the SAME guardian gate as Phase 1.
+        """
+        from browser.agent import run_research
+        from browser.config import AGENT_MAX_STEPS
+
+        # nav brain -> a single JSON action per step (token-cheap, fast).
+        def _think(prompt: str) -> str:
+            return self.brain.think_fast(prompt, brain_type="navigation")
+
+        # plain-text synthesis for the cap/fallback path (no JSON directive).
+        def _synth(prompt: str) -> str:
+            return self.brain.think_fast(
+                prompt, brain_type="navigation", num_predict=400,
+                system_prompt="You are a concise research assistant. Answer in plain text.",
+            )
+
+        res = run_research(
+            goal, think_fn=_think, synth_fn=_synth,
+            max_steps=max_steps if max_steps is not None else AGENT_MAX_STEPS,
+        )
+        return {
+            "agent": "BrowserResearchAgent",
+            "language": detect_language(goal),
+            "thinking": ("read-only browser research: %d step(s), stopped=%s"
+                         % (res["steps"], res["stopped"])),
+            "output": res["answer"],
+            "steps": res["steps"],
+            "stopped": res["stopped"],
+            "total_ms": res["total_ms"],
+            "trace": res["trace"],
+        }
+
+    # --------------------------------------------------
+    # Brain Mode — STREAMING (token-by-token)
+    # --------------------------------------------------
+    def brain_task_stream(self, task):
+        """
+        Streaming counterpart of brain_task for the plain LLM-chat path.
+
+        Yields response text chunks as the model generates them. The RAG grounding
+        decision (intent-gated retrieval + 0.45 distance gate + top-3 injection)
+        is resolved BEFORE the first token is yielded, so grounding is byte-for-
+        byte identical to brain_task — only the final generation is streamed.
+
+        Callers must only use this for the plain chat-generation path (i.e. when
+        decide_tool would return None and the message isn't coding/vision/tool);
+        app.py makes that determination and routes tool/coding messages through
+        the non-streaming brain_task instead. Kept separate so brain_task stays
+        untouched for every existing caller/test.
+        """
+        # RAG grounding (same logic + same intent gate as brain_task), resolved
+        # up-front so no token is streamed before the grounding decision is made.
+        grounded_system = None
+        if _should_run_rag(task):
+            try:
+                from core.knowledge import retrieve_context, build_grounded_system
+                _context, _sources = retrieve_context(task)
+            except Exception:
+                _context = ""
+            if _context:
+                from core.brain_registry import get_system_prompt
+                grounded_system = build_grounded_system(get_system_prompt("default"), _context)
+
+        if grounded_system:
+            yield from self.brain.think_stream(task, system_override=grounded_system)
+        else:
+            yield from self.brain.think_stream(task)
 
     # --------------------------------------------------
     # Autonomous Mode (Preserved + Coding Tools Added)

@@ -10,10 +10,12 @@ from .guarded import (
     open_page, web_search,
     browser_navigate, browser_read, browser_get_content,
 )
-from .routing import should_use_browser
+from .routing import should_use_browser, is_browser_research_request
+from .agent import BrowserResearchAgent, run_research
 
 __all__ = [
     "web_search", "open_page",
     "browser_navigate", "browser_read", "browser_get_content",
-    "should_use_browser",
+    "should_use_browser", "is_browser_research_request",
+    "BrowserResearchAgent", "run_research",
 ]
