@@ -93,29 +93,39 @@ class ActionParseResilienceTests(unittest.TestCase):
         self.assertEqual(res["stopped"], "parse_error")
 
 
-class ReadOnlyEnforcementTests(unittest.TestCase):
+class ActionSurfaceTests(unittest.TestCase):
+    # agent.py must never call raw Playwright primitives directly — it dispatches
+    # ONLY to the guarded wrappers, which remain the enforcement point.
     FORBIDDEN = (".click(", ".dblclick(", ".fill(", ".type(", ".press(", ".check(",
                  ".uncheck(", ".select_option(", ".set_input_files(", ".tap(",
                  ".drag_to(", ".hover(", "mouse.", "keyboard.")
 
-    def test_only_read_actions_exposed(self):
-        self.assertEqual(set(A.READ_ONLY_ACTIONS),
-                         {"search", "navigate", "read_page", "get_content", "finish"})
+    def test_action_set_is_read_plus_gated_interactive(self):
+        self.assertEqual(set(A.READ_ACTIONS), {"search", "navigate", "read_page", "get_content"})
+        self.assertEqual(set(A.INTERACTIVE_ACTIONS),
+                         {"click", "type_text", "select_option", "press_key"})
+        self.assertIn("finish", A.AGENT_ACTIONS)
 
-    def test_parser_rejects_state_changing_action(self):
-        for bad in ('{"tool":"click","args":{"selector":"#buy"}}',
-                    '{"tool":"type","args":{"text":"hi"}}',
-                    '{"tool":"fill","args":{}}'):
+    def test_parser_accepts_interactive_actions_but_rejects_unknown(self):
+        # Phase 3: interactive actions are now valid loop actions (they get gated
+        # downstream in the guarded wrappers, not rejected at parse time).
+        for good in ('{"tool":"click","args":{"target":{"text":"Next"},"url":"https://x"}}',
+                     '{"tool":"type_text","args":{"target":{"name":"q"},"text":"hi","url":"https://x"}}'):
+            self.assertIsNotNone(A._parse_action(good))
+        # Genuinely unknown / non-exposed tools are still rejected.
+        for bad in ('{"tool":"pay","args":{}}',
+                    '{"tool":"download_file","args":{}}',
+                    '{"tool":"evaluate_js","args":{}}'):
             self.assertIsNone(A._parse_action(bad))
 
     def test_dispatch_rejects_unknown_tool(self):
-        out = A._dispatch("click", {"selector": "#buy"})
+        out = A._dispatch("delete_everything", {"selector": "#buy"})
         self.assertEqual(out["marker"], "UNKNOWN_TOOL")
 
-    def test_agent_source_has_no_interaction_primitives(self):
+    def test_agent_source_calls_only_guarded_wrappers(self):
         src = pathlib.Path(A.__file__).read_text(encoding="utf-8")
         for bad in self.FORBIDDEN:
-            self.assertNotIn(bad, src, f"agent.py contains forbidden interaction call {bad!r}")
+            self.assertNotIn(bad, src, f"agent.py calls a raw interaction primitive {bad!r}")
 
 
 class GuardianInPathTests(unittest.TestCase):

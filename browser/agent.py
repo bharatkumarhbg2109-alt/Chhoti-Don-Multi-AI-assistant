@@ -36,15 +36,22 @@ from .config import (AGENT_MAX_STEPS, AGENT_OBS_CHARS, AGENT_MAX_OBS,
 
 logger = logging.getLogger("chhoti.browser.agent")
 
-# The ONLY actions the loop may take. Every web action maps to a Phase-1 GUARDED
-# wrapper (never the raw session), so browser.guarded._gate stays in the path.
-READ_ONLY_ACTIONS = ("search", "navigate", "read_page", "get_content", "finish")
+# Actions the loop may take. READ actions auto-allow; INTERACTIVE (state-changing)
+# actions are HITL-gated inside the guarded wrappers (CRITICAL hard-blocked,
+# MEDIUM/HIGH require explicit approval). Every action maps to a GUARDED wrapper —
+# never the raw session — so browser.guarded stays the authoritative enforcement.
+READ_ACTIONS = ("search", "navigate", "read_page", "get_content")
+INTERACTIVE_ACTIONS = ("click", "type_text", "select_option", "press_key")
+AGENT_ACTIONS = READ_ACTIONS + INTERACTIVE_ACTIONS + ("finish",)
+# Backward-compatible alias kept for the read subset used elsewhere.
+READ_ONLY_ACTIONS = READ_ACTIONS + ("finish",)
 
-_GATE_DENY_MARKERS = {"BLOCKED_DOMAIN", "RATE_LIMITED", "GUARDIAN_DENIED", "INVALID_URL"}
+_GATE_DENY_MARKERS = {"BLOCKED_DOMAIN", "RATE_LIMITED", "GUARDIAN_DENIED",
+                      "INVALID_URL", "CRITICAL_BLOCKED"}
 
 
 def _dispatch(tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute a read-only action via the guarded wrappers (guardian in path)."""
+    """Execute an action via the guarded wrappers (guardian/HITL in the path)."""
     if tool == "search":
         return guarded.web_search({"query": str(args.get("query", "")).strip(),
                                    "max_results": int(args.get("max_results", 5) or 5)})
@@ -54,6 +61,22 @@ def _dispatch(tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return guarded.browser_read({"url": str(args.get("url", "")).strip()})
     if tool == "get_content":
         return guarded.browser_get_content({"url": str(args.get("url", "")).strip()})
+    # ── State-changing (HITL-gated inside the guarded wrappers) ──
+    if tool == "click":
+        return guarded.browser_click({"url": str(args.get("url", "")).strip(),
+                                      "target": args.get("target")})
+    if tool == "type_text":
+        return guarded.browser_type({"url": str(args.get("url", "")).strip(),
+                                     "target": args.get("target"),
+                                     "text": args.get("text", args.get("value"))})
+    if tool == "select_option":
+        return guarded.browser_select({"url": str(args.get("url", "")).strip(),
+                                       "target": args.get("target"),
+                                       "value": args.get("value", args.get("option"))})
+    if tool == "press_key":
+        return guarded.browser_press({"url": str(args.get("url", "")).strip(),
+                                      "target": args.get("target"),
+                                      "key": args.get("key", "Enter")})
     return {"status": "error", "marker": "UNKNOWN_TOOL", "tool": tool}
 
 
@@ -84,7 +107,7 @@ def _parse_action(raw: str) -> Optional[Dict[str, Any]]:
     if not isinstance(obj, dict):
         return None
     tool = str(obj.get("tool") or obj.get("action") or "").strip().lower()
-    if tool not in READ_ONLY_ACTIONS:
+    if tool not in AGENT_ACTIONS:
         return None
     args = obj.get("args")
     if not isinstance(args, dict):
@@ -108,6 +131,12 @@ def _summarize(tool: str, result: Dict[str, Any], obs_chars: int) -> str:
         return "\n".join(lines)[:obs_chars]
     if tool == "navigate":
         return f"title={result.get('title', '')} url={result.get('url', '')}"[:obs_chars]
+    if tool in ("click", "press_key"):
+        return (f"{tool} ok -> url={result.get('url', '')} "
+                f"title={result.get('title', '')}")[:obs_chars]
+    if tool in ("type_text", "select_option"):
+        got = result.get("value", result.get("selected", ""))
+        return f"{tool} ok -> value={got} url={result.get('url', '')}"[:obs_chars]
     # read_page / get_content -> page content (already boilerplate-stripped)
     header = f"[{result.get('title', '')}] {result.get('url', '')}\n"
     return (header + (result.get("content", "") or ""))[:obs_chars]

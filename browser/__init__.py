@@ -9,13 +9,16 @@ See routing.py for when to prefer which.
 from .guarded import (
     open_page, web_search,
     browser_navigate, browser_read, browser_get_content,
+    browser_click, browser_type, browser_select, browser_press,
 )
 from .routing import should_use_browser, is_browser_research_request
 from .agent import BrowserResearchAgent, run_research
+from . import hitl
 
 __all__ = [
     "web_search", "open_page",
     "browser_navigate", "browser_read", "browser_get_content",
+    "browser_click", "browser_type", "browser_select", "browser_press",
     "should_use_browser", "is_browser_research_request",
-    "BrowserResearchAgent", "run_research",
+    "BrowserResearchAgent", "run_research", "hitl",
 ]

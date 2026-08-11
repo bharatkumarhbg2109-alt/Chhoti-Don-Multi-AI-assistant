@@ -55,3 +55,10 @@ AGENT_OBS_CHARS = int(os.environ.get("CHHOTI_DON_AGENT_OBS_CHARS", "1200"))
 AGENT_MAX_OBS = int(os.environ.get("CHHOTI_DON_AGENT_MAX_OBS", "6"))
 AGENT_NUM_PREDICT = int(os.environ.get("CHHOTI_DON_AGENT_NUM_PREDICT", "256"))
 AGENT_MAX_PARSE_RETRIES = int(os.environ.get("CHHOTI_DON_AGENT_MAX_PARSE_RETRIES", "3"))
+
+
+# ── HITL confirmation (Phase 3: state-changing actions behind approval) ───────
+# How long a paused pending-action waits for the user's approve/deny before it
+# FAILS SAFE to DENY. Kept short-ish so a forgotten confirmation can't wedge a
+# background worker forever.
+HITL_CONFIRM_TIMEOUT_S = float(os.environ.get("CHHOTI_DON_HITL_TIMEOUT_S", "120"))

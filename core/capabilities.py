@@ -40,6 +40,10 @@ def get_capabilities() -> List[Dict]:
     # Phase 2: read-only multi-step research agent loop.
     research_ok = (_importable("browser.agent", "run_research")
                    and _importable("playwright"))
+    # Phase 3: state-changing actions behind a HITL confirmation gate.
+    interact_ok = (_importable("browser.guarded", "browser_click")
+                   and _importable("browser.hitl", "confirm")
+                   and _importable("playwright"))
     cyber_ok = _importable("cyber_engine.cyber_controller", "CyberController")
     heal_ok = _importable("cyber_engine.code_intelligence.code_controller", "run_code_intelligence")
     # New local voice package (faster-whisper STT + Piper TTS), wired to the UI
@@ -131,6 +135,19 @@ def get_capabilities() -> List[Dict]:
                             "find out X'. No clicking/typing/logins."),
             "risk_level": "low",
             "requires_confirmation": False,
+            "view": "assistant",
+        },
+        {
+            "id": "browser_interact",
+            "name": "Browser Interaction (HITL-gated)",
+            "available": interact_ok,
+            "category": "Web",
+            "description": ("State-changing browser actions (click / type / select / press) behind a "
+                            "human-in-the-loop confirmation gate: the agent proposes each risky action "
+                            "and executes ONLY after explicit approval. Payment/checkout/submit are "
+                            "hard-blocked. Opt-in via /api/browser/research(+/respond)."),
+            "risk_level": "high",
+            "requires_confirmation": True,
             "view": "assistant",
         },
         {

@@ -179,18 +179,24 @@ BRAINS: Dict[str, Dict] = {
         "temperature": 0.1,
         "max_tokens": 256,
         "system_prompt": (
-            "You are a READ-ONLY web research agent. Reach the user's GOAL by "
-            "choosing ONE next action per step. You can ONLY read the web — you "
-            "cannot click, type, log in, buy, or change anything.\n"
-            "Available actions:\n"
-            "  search      args: {\"query\": str}          -> web results (links+snippets)\n"
-            "  navigate    args: {\"url\": str}            -> page title + final URL\n"
-            "  read_page   args: {\"url\": str}            -> clean readable page text\n"
-            "  get_content args: {\"url\": str}            -> accessibility outline\n"
-            "  finish      args: {\"answer\": str}         -> stop and give the answer\n"
-            "Use search then read at least one result before you finish; do not "
-            "answer from memory alone. Respond with a SINGLE JSON object and "
-            "NOTHING else, e.g.: {\"thought\":\"...\",\"tool\":\"search\",\"args\":{\"query\":\"...\"}}"
+            "You are a web research/automation agent. Reach the user's GOAL by "
+            "choosing ONE next action per step.\n"
+            "READ actions (auto-allowed):\n"
+            "  search      args: {\"query\": str}                         -> results (links+snippets)\n"
+            "  navigate    args: {\"url\": str}                           -> page title + final URL\n"
+            "  read_page   args: {\"url\": str}                           -> clean readable page text\n"
+            "  get_content args: {\"url\": str}                           -> accessibility outline\n"
+            "INTERACTIVE actions (STATE-CHANGING — each needs the user's approval before it runs):\n"
+            "  click       args: {\"url\": str, \"target\": {role/name or text or selector}}\n"
+            "  type_text   args: {\"url\": str, \"target\": {...}, \"text\": str}\n"
+            "  select_option args: {\"url\": str, \"target\": {...}, \"value\": str}\n"
+            "  press_key   args: {\"url\": str, \"target\": {...}?, \"key\": str}\n"
+            "  finish      args: {\"answer\": str}                        -> stop and answer\n"
+            "NEVER attempt payment, checkout, buy, place-order, or form-submit actions — "
+            "they are blocked. Prefer read actions; only interact when the GOAL truly "
+            "requires it, and identify targets by role+name/label/text (not coordinates). "
+            "Respond with a SINGLE JSON object and NOTHING else, e.g.: "
+            "{\"thought\":\"...\",\"tool\":\"search\",\"args\":{\"query\":\"...\"}}"
         ),
         "description": "Read-only browser agent action planner (structured JSON).",
         "capabilities": ["plan", "browse", "route"],

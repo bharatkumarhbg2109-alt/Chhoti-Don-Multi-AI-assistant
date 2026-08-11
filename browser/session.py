@@ -182,6 +182,64 @@ class BrowserSession:
         await self._page.screenshot(path=path, full_page=False)
         return path
 
+    # ── Interaction (Phase 3) — STATE-CHANGING, gate-guarded upstream ──────────
+    # These perform real interactions and are reached ONLY through the guarded
+    # wrappers in browser.guarded, which classify risk, HARD-BLOCK CRITICAL, and
+    # require HITL confirmation for MEDIUM/HIGH before any of these run. Elements
+    # are located by stable accessibility refs (role/name/label/selector/text) —
+    # never pixel coordinates, no vision model.
+    def _locate(self, target):
+        page = self._page
+        if isinstance(target, str):
+            return page.get_by_text(target, exact=False).first
+        t = target or {}
+        if t.get("selector"):
+            return page.locator(t["selector"]).first
+        role, name = t.get("role"), t.get("name")
+        if role and name:
+            return page.get_by_role(role, name=name, exact=False).first
+        if role:
+            return page.get_by_role(role).first
+        if t.get("label"):
+            return page.get_by_label(t["label"], exact=False).first
+        if t.get("placeholder"):
+            return page.get_by_placeholder(t["placeholder"], exact=False).first
+        if t.get("text"):
+            return page.get_by_text(t["text"], exact=False).first
+        return page.locator("body").first  # ambiguous — the gate should have blocked this
+
+    async def click(self, target) -> dict:
+        await self._locate(target).click(timeout=NAV_TIMEOUT_MS)
+        try:
+            await self._page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_TIMEOUT_MS)
+        except Exception:
+            pass
+        return {"url": self._page.url, "title": (await self._page.title()) or ""}
+
+    async def type_text(self, target, text: str) -> dict:
+        loc = self._locate(target)
+        await loc.fill(str(text), timeout=NAV_TIMEOUT_MS)
+        try:
+            value = await loc.input_value(timeout=NAV_TIMEOUT_MS)
+        except Exception:
+            value = str(text)
+        return {"value": value, "url": self._page.url}
+
+    async def select_option(self, target, value: str) -> dict:
+        selected = await self._locate(target).select_option(str(value), timeout=NAV_TIMEOUT_MS)
+        return {"selected": selected, "url": self._page.url}
+
+    async def press_key(self, key: str, target=None) -> dict:
+        if target:
+            await self._locate(target).press(str(key), timeout=NAV_TIMEOUT_MS)
+        else:
+            await self._page.keyboard.press(str(key))
+        try:
+            await self._page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_TIMEOUT_MS)
+        except Exception:
+            pass
+        return {"url": self._page.url, "title": (await self._page.title()) or ""}
+
     async def close(self) -> None:
         try:
             if self._context is not None:
@@ -302,3 +360,44 @@ def get_content(url: str, headless: Optional[bool] = None) -> Dict[str, Any]:
         "content_is_untrusted": True,
         "render": "playwright-accessibility",
     }
+
+
+# ── Interaction one-shots (Phase 3) — raw; the guarded wrappers gate them ──────
+async def _interact_async(url, action, target, value, key, headless):
+    session = BrowserSession(headless=headless)
+    try:
+        await session.launch()
+        await session.navigate(url)
+        if action == "click":
+            res = await session.click(target)
+        elif action == "type_text":
+            res = await session.type_text(target, value)
+        elif action == "select_option":
+            res = await session.select_option(target, value)
+        elif action == "press_key":
+            res = await session.press_key(key, target)
+        else:
+            return {"status": "error", "marker": "UNKNOWN_ACTION", "action": action}
+        return {"status": "success", "action": action, **res}
+    finally:
+        await session.close()
+
+
+def do_action(url: str, action: str, target=None, value=None, key=None,
+              headless: Optional[bool] = None) -> Dict[str, Any]:
+    """One-shot interaction: open -> navigate(url) -> perform ONE action -> close.
+
+    RAW: performs the action unconditionally. It must only ever be called from the
+    guarded wrappers in browser.guarded, which have already classified the risk,
+    hard-blocked CRITICAL, and obtained HITL approval.
+    """
+    timeout_s = OPERATION_TIMEOUT_MS / 1000.0
+    try:
+        return _run(asyncio.wait_for(
+            _interact_async(url, action, target, value, key, headless), timeout=timeout_s))
+    except PlaywrightNotInstalled as exc:
+        return {"status": "error", "marker": "PLAYWRIGHT_NOT_INSTALLED", "message": str(exc)}
+    except asyncio.TimeoutError:
+        return {"status": "error", "marker": "PAGE_TIMEOUT", "url": url}
+    except Exception as exc:
+        return {"status": "error", "marker": "ACTION_FAILED", "url": url, "message": str(exc)}

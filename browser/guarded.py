@@ -12,6 +12,7 @@ from cyber_engine.guardian.operator_guard import OperatorGuard
 from .config import BLOCKED_DOMAINS, RATE_LIMIT_PER_MIN, REQUIRE_CONFIRMATION
 from . import search as _raw_search
 from . import session as _raw_session
+from . import hitl
 
 logger = logging.getLogger("chhoti.browser")
 
@@ -128,3 +129,89 @@ def browser_get_content(input_data: Dict[str, Any]) -> Dict[str, Any]:
     data = input_data if isinstance(input_data, dict) else {"url": str(input_data)}
     url = str(data.get("url") or "").strip()
     return _guarded_browser("web_get_content", url, _raw_session.get_content)
+
+
+# ── Playwright INTERACTION (Phase 3: STATE-CHANGING, HITL-gated) ──────────────
+# This is the AUTHORITATIVE enforcement point for state-changing actions — NOT
+# the LLM prompt. Order matters and is fail-safe:
+#   1. classify risk tier (hitl.classify)
+#   2. CRITICAL (submit/checkout/pay/order, or ambiguous target) -> HARD BLOCK,
+#      never offered for confirmation
+#   3. blocklist + per-domain rate limit (shared with the read path)
+#   4. HITL confirmation for MEDIUM/HIGH via hitl.confirm() — with NO provider the
+#      default is DENY, so an action the model "forgot" to ask about is blocked
+#      here regardless
+#   5. only on explicit approval does the raw one-shot action run
+# Every stage is written to the audit log (logger chhoti.browser.audit).
+def _interactive_gate(action: str, url: str, target=None, value=None,
+                      key=None) -> Dict[str, Any]:
+    if urlparse(url).scheme not in {"http", "https"} or not _domain(url):
+        return {"status": "error", "marker": "INVALID_URL", "url": url, "action": action}
+
+    domain = _domain(url)
+    cls = hitl.classify(action, target=target, value=value, url=url)
+    tier = cls["tier"]
+    proposal = hitl.make_proposal(action, target, value, url, tier)
+
+    # 2) CRITICAL -> hard block (refused outright; no confirmation this phase).
+    if cls["critical"]:
+        hitl.audit.info("BLOCK CRITICAL %s", proposal.describe())
+        logger.info("[browser-guardian] action=%s domain=%s tier=CRITICAL decision=BLOCKED",
+                    action, domain)
+        return {"status": "error", "marker": "CRITICAL_BLOCKED", "tier": "CRITICAL",
+                "action": action, "domain": domain,
+                "message": ("Payment/checkout/submit/order actions are hard-blocked in "
+                            "this phase and are not offered for confirmation.")}
+
+    # 3) blocklist + rate limit (same primitives as the read gate).
+    if _is_blocked(domain):
+        return {"status": "error", "marker": "BLOCKED_DOMAIN", "domain": domain}
+    now = monotonic()
+    calls = _calls_by_domain[domain]
+    while calls and now - calls[0] >= 60:
+        calls.popleft()
+    if len(calls) >= RATE_LIMIT_PER_MIN:
+        return {"status": "error", "marker": "RATE_LIMITED", "domain": domain}
+    calls.append(now)
+
+    # 4) HITL confirmation (gate-enforced; default provider = DENY).
+    approved = hitl.confirm(proposal)
+    logger.info("[browser-guardian] action=%s domain=%s tier=%s decision=%s",
+                action, domain, tier, "APPROVE" if approved else "DENY")
+    if not approved:
+        return {"status": "error", "marker": "GUARDIAN_DENIED", "tier": tier,
+                "action": action, "domain": domain}
+
+    # 5) execute ONLY after explicit approval (one live browser at a time).
+    with _browser_lock:
+        result = _raw_session.do_action(url, action, target=target, value=value, key=key)
+    hitl.audit.info("RESULT %s -> %s", proposal.describe(),
+                    result.get("status") if isinstance(result, dict) else result)
+    return result
+
+
+def browser_click(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded HIGH-risk click. Requires HITL approval; CRITICAL targets blocked."""
+    d = input_data if isinstance(input_data, dict) else {}
+    return _interactive_gate("click", str(d.get("url") or "").strip(), target=d.get("target"))
+
+
+def browser_type(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded MEDIUM-risk text entry. Requires HITL approval."""
+    d = input_data if isinstance(input_data, dict) else {}
+    return _interactive_gate("type_text", str(d.get("url") or "").strip(),
+                             target=d.get("target"), value=d.get("text", d.get("value")))
+
+
+def browser_select(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded MEDIUM-risk <select> option choice. Requires HITL approval."""
+    d = input_data if isinstance(input_data, dict) else {}
+    return _interactive_gate("select_option", str(d.get("url") or "").strip(),
+                             target=d.get("target"), value=d.get("value", d.get("option")))
+
+
+def browser_press(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded HIGH-risk key press (e.g. Enter). Requires HITL approval."""
+    d = input_data if isinstance(input_data, dict) else {}
+    return _interactive_gate("press_key", str(d.get("url") or "").strip(),
+                             target=d.get("target"), key=d.get("key", "Enter"))

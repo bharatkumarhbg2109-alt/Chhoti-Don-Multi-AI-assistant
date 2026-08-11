@@ -73,25 +73,35 @@ class BrowserGuardianRoutingTests(unittest.TestCase):
         self.assertIn("action=web_navigate", "\n".join(cm.output))
 
 
-class ReadOnlyInvariantTests(unittest.TestCase):
-    """Phase 1 must contain NO clicking/typing/state-changing code."""
+class ReadPathInvariantTests(unittest.TestCase):
+    """Phase 3 supersedes the Phase-1/2 'no interaction anywhere' invariant by
+    ADDING gated interaction. The invariant is now stronger and behavioral:
+      * the READ methods/wrappers stay read-only (never call the interaction
+        one-shot do_action), and
+      * interaction exists only as the designated BrowserSession methods, which
+        are reachable solely through the HITL-gated guarded wrappers.
+    Gate enforcement itself is proven in test_browser_hitl.py (checks C/D/E)."""
 
-    FORBIDDEN = (".click(", ".dblclick(", ".fill(", ".type(", ".press(",
-                 ".check(", ".uncheck(", ".select_option(", ".set_input_files(",
-                 ".tap(", ".drag_to(", ".hover(", "mouse.", "keyboard.")
+    def test_read_methods_and_interaction_methods_present(self):
+        read_api = {"navigate", "get_page_content", "extract_text", "screenshot", "close"}
+        interact_api = {"click", "type_text", "select_option", "press_key"}
+        attrs = set(dir(bsession.BrowserSession))
+        self.assertTrue(read_api <= attrs, f"read API missing: {read_api - attrs}")
+        self.assertTrue(interact_api <= attrs, f"interaction API missing: {interact_api - attrs}")
 
-    def test_browser_session_exposes_no_interaction_methods(self):
-        forbidden_attrs = {"click", "type", "fill", "press", "check", "select_option",
-                           "set_input_files", "tap", "dblclick", "drag", "hover"}
-        present = forbidden_attrs & set(dir(bsession.BrowserSession))
-        self.assertEqual(present, set(), f"interaction methods leaked: {present}")
-
-    def test_browser_sources_contain_no_interaction_calls(self):
-        pkg = pathlib.Path(bsession.__file__).parent
-        for name in ("session.py", "guarded.py", "routing.py"):
-            src = (pkg / name).read_text(encoding="utf-8")
-            for bad in self.FORBIDDEN:
-                self.assertNotIn(bad, src, f"{name} contains forbidden interaction call {bad!r}")
+    def test_read_guarded_wrappers_never_call_interaction(self):
+        # The read wrappers must resolve to the READ one-shots only, never the
+        # interaction one-shot do_action().
+        from browser import guarded
+        guarded._calls_by_domain.clear()
+        with patch.object(guarded._raw_session, "do_action") as do_action, \
+             patch.object(guarded._raw_session, "navigate", return_value={"status": "success", "url": "https://x", "title": "t"}), \
+             patch.object(guarded._raw_session, "read_page", return_value={"status": "success", "url": "https://x", "content": "c"}), \
+             patch.object(guarded._raw_session, "get_content", return_value={"status": "success", "url": "https://x", "content": "o"}):
+            guarded.browser_navigate({"url": "https://readpath-inv.test/a"})
+            guarded.browser_read({"url": "https://readpath-inv.test/b"})
+            guarded.browser_get_content({"url": "https://readpath-inv.test/c"})
+        do_action.assert_not_called()
 
 
 class AccessibilityConversionTests(unittest.TestCase):

@@ -9,9 +9,10 @@ so the desktop shell can load the whole app same-origin from the backend,
 which keeps /api calls relative and avoids cross-origin complications.
 """
 
-from flask import Flask, request, jsonify, send_from_directory, abort
+from flask import (Flask, request, jsonify, send_from_directory, abort,
+                   Response, stream_with_context)
 from flask_cors import CORS
-import os, sys, time, socket, traceback, logging, uuid, re
+import os, sys, time, socket, traceback, logging, uuid, re, json
 
 # Ensure UTF-8 stdout/stderr so emoji log lines don't crash under a cp1252
 # console or when the launcher redirects output to a log file (Windows).
@@ -55,8 +56,23 @@ print("✅ Chhoti Don ready!\n")
 
 
 # ── Provider / model detection (shared by status + persistence) ─
-def _current_provider_model():
-    """Return (provider, model, runtime_mode, live) using the same rules as /api/status."""
+# Memoized with a short TTL so a normal chat turn does NOT hit Ollama's
+# /api/tags on every request. The resolved provider/model rarely changes at
+# runtime (brain.mode is fixed at boot; the model comes from env/config), so a
+# 60s cache is safe. An empty/expired cache falls back to a live check; the
+# /api/status endpoint passes force_refresh=True to always report fresh state.
+_PROVIDER_CACHE = {"value": None, "ts": 0.0}
+_PROVIDER_CACHE_TTL = float(os.environ.get("CHHOTI_DON_PROVIDER_TTL", "60"))
+
+
+def _current_provider_model(force_refresh: bool = False):
+    """Return (provider, model, runtime_mode, live, ...) using the same rules as /api/status."""
+    now = time.time()
+    cached = _PROVIDER_CACHE["value"]
+    if (not force_refresh and cached is not None
+            and (now - _PROVIDER_CACHE["ts"]) < _PROVIDER_CACHE_TTL):
+        return cached
+
     try:
         from core.brain_router import check_ollama_status
         ollama = check_ollama_status()
@@ -85,7 +101,10 @@ def _current_provider_model():
         model_available = _model_present(configured_model, models)
 
     live = startup_mode == "api" or (ollama_online and model_available)
-    return provider, configured_model, startup_mode, live, ollama_online, models, model_available
+    result = (provider, configured_model, startup_mode, live, ollama_online, models, model_available)
+    _PROVIDER_CACHE["value"] = result
+    _PROVIDER_CACHE["ts"] = now
+    return result
 
 
 # ── Serve built React dashboard (SPA) ─────────────────────────
@@ -136,6 +155,90 @@ def _chat_error(req_id, code, message, http_status, retryable):
     }), http_status
 
 
+# ── Streaming (SSE) helpers ───────────────────────────────────
+# tool_ids whose routing does NOT resolve to a plain, token-streamable LLM
+# generation (they produce code, tool output, or run the autonomous planner).
+_NON_STREAM_TOOL_IDS = {
+    "coder", "reveng", "strings", "autofix",
+    "recon", "malware", "pentest", "webscan", "exploit", "mitre", "ioc", "heatmap",
+    "search",  # "search" routes into the web_search tool inside brain_task
+}
+
+
+def _is_stream_chat_path(message, tool_id):
+    """True only when this message resolves to the plain LLM chat generation that
+    brain_task_stream can token-stream. Mirrors _route_to_tool + brain.decide_tool
+    so the streamed path matches the non-streamed routing exactly; anything else
+    (coding, tools, vision, autonomous, or an image-path message) returns False
+    and is served by the existing non-streaming path."""
+    if tool_id in _NON_STREAM_TOOL_IDS:
+        return False
+    if _IMAGE_PATH_RE.search(message):
+        return False
+    if detect_intent(message) in ("coding", "debug") or detect_task(message) == "coding":
+        return False
+    try:
+        if chhoti_don.brain.decide_tool(message) is not None:
+            return False
+    except Exception:
+        return False
+    return True
+
+
+def _sse_chat_response(stream_gen, *, req_id, tool_id, engine, intent, task_type,
+                       category, conv_id, private, provider, model, live, t0):
+    """Wrap a text-chunk generator as a Server-Sent-Events stream.
+
+    Emits one ``data: {"token": "..."}`` event per chunk as the model produces
+    it, then a final ``data: {"done": true, ...}`` carrying the SAME fields as the
+    non-streaming JSON response, then a terminal ``data: [DONE]``. The full reply
+    is assembled from the chunks and persisted after the stream completes — so the
+    stored assistant message is identical to the non-streaming path.
+    """
+    @stream_with_context
+    def _generate():
+        parts = []
+        try:
+            for chunk in stream_gen:
+                parts.append(chunk)
+                yield f"data: {json.dumps({'token': chunk})}\n\n"
+        except Exception:
+            log.exception("chat stream failed req=%s", req_id)
+            yield f"data: {json.dumps({'error': 'stream_failed', 'request_id': req_id})}\n\n"
+
+        text = "".join(parts)
+        exec_t = round(time.time() - t0, 2)
+        assistant_msg = None
+        if conv_id and not private:
+            try:
+                assistant_msg = history_store.add_message(
+                    conv_id, "assistant", text,
+                    status="complete", provider=provider, model=model,
+                    metadata={"tool": tool_id, "execution_time": exec_t, "category": category},
+                    auto_title=False,
+                )
+            except Exception:
+                log.exception("chat stream persist failed req=%s", req_id)
+
+        log.info("chat(stream) req=%s route=%s intent=%s task=%s engine=%s provider=%s model=%s dur=%ss",
+                 req_id, tool_id, intent, task_type, engine, provider, model, exec_t)
+
+        done = {
+            "done": True, "status": "success", "success": True,
+            "response": text, "tool": tool_id, "intent": intent, "task_type": task_type,
+            "execution_time": exec_t, "conversation_id": conv_id,
+            "message_id": assistant_msg["id"] if assistant_msg else None,
+            "provider": provider, "model": model, "live": live, "category": category,
+        }
+        yield f"data: {json.dumps(done)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return Response(_generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache",
+                             "X-Accel-Buffering": "no",
+                             "Connection": "keep-alive"})
+
+
 # ── Main Chat ─────────────────────────────────────────────────
 @app.route("/api/chat", methods=["POST"])
 def chat():
@@ -162,6 +265,37 @@ def chat():
         # Persist the user message up-front (unless private or a retry).
         if conv_id and not private and persist_user:
             history_store.add_message(conv_id, "user", message)
+
+        # ── Streaming (SSE) path: OPT-IN via {"stream": true} or ?stream=1. ──
+        # Default stays non-streaming JSON, so the existing frontend and every
+        # caller/test that reads the old JSON shape are unaffected. The guardian
+        # gate, routing, decide_tool and the RAG decision ALL run before the first
+        # token; only the final model generation is streamed. A guarded/refused
+        # message, or any non-chat path (tool / coding / vision), falls through to
+        # the normal non-streaming block below and returns the usual JSON — never
+        # streamed garbage.
+        want_stream = (bool(data.get("stream"))
+                       or request.args.get("stream", "").lower() in ("1", "true", "yes"))
+        if want_stream and not image_b64:
+            decision = safety_policy.evaluate(message)
+            category = decision.get("category")
+            if decision["action"] == "educational":
+                intent, task_type = detect_intent(message), detect_task(message)
+                return _sse_chat_response(
+                    chhoti_don.brain_task_stream(safety_policy.educational_prompt(message)),
+                    req_id=req_id, tool_id=tool_id, engine="educational",
+                    intent=intent, task_type=task_type, category=category,
+                    conv_id=conv_id, private=private, provider=provider, model=model,
+                    live=live, t0=t0)
+            if decision["action"] == "allow" and _is_stream_chat_path(message, tool_id):
+                intent, task_type = detect_intent(message), detect_task(message)
+                return _sse_chat_response(
+                    chhoti_don.brain_task_stream(message),
+                    req_id=req_id, tool_id=tool_id, engine="router",
+                    intent=intent, task_type=task_type, category=category,
+                    conv_id=conv_id, private=private, provider=provider, model=model,
+                    live=live, t0=t0)
+            # 'refuse', or a non-chat/tool path -> fall through to non-streaming JSON.
 
         # An uploaded image bypasses the text safety policy and goes straight to
         # the local vision model (image bytes aren't offensive-text to classify).
@@ -343,6 +477,65 @@ def _extract_response(result) -> str:
     return str(output) if output else str(result)
 
 
+# ── Interactive browser research with HITL confirmation (Phase 3) ─────────────
+# OPT-IN, additive endpoints. Ordinary /api/chat (incl. Phase-2 read-only
+# research) is UNCHANGED. The interactive agent runs in a background thread; when
+# it proposes a MEDIUM/HIGH state-changing action it PAUSES and this endpoint
+# returns a pending-action. The user resumes it with approve/deny via /respond.
+# CRITICAL (payment/checkout/submit) actions are hard-blocked inside the gate and
+# never surface as a confirmation. No answer within the timeout -> DENY.
+def _nav_think_fns():
+    def _think(prompt):
+        return chhoti_don.brain.think_fast(prompt, brain_type="navigation")
+
+    def _synth(prompt):
+        return chhoti_don.brain.think_fast(
+            prompt, brain_type="navigation", num_predict=400,
+            system_prompt="You are a concise research assistant. Answer in plain text.")
+    return _think, _synth
+
+
+@app.route("/api/browser/research", methods=["POST"])
+def browser_research_start():
+    try:
+        from browser import hitl
+        data = request.get_json(silent=True) or {}
+        goal = str(data.get("goal") or data.get("message") or "").strip()
+        if not goal:
+            return jsonify({"status": "error", "message": "A research goal is required."}), 400
+        session_id = str(data.get("session_id") or uuid.uuid4().hex[:12])
+        max_steps = data.get("max_steps")
+        think, synth = _nav_think_fns()
+        hitl.start_run(session_id, goal, think_fn=think, synth_fn=synth,
+                       max_steps=int(max_steps) if max_steps is not None else None)
+        checkpoint = hitl.poll(session_id, wait=float(data.get("wait", 45)))
+        return jsonify({"session_id": session_id, **checkpoint})
+    except Exception:
+        log.exception("browser research start failed")
+        return jsonify({"status": "error", "message": "Interactive research failed to start."}), 500
+
+
+@app.route("/api/browser/research/respond", methods=["POST"])
+def browser_research_respond():
+    try:
+        from browser import hitl
+        data = request.get_json(silent=True) or {}
+        session_id = str(data.get("session_id") or "").strip()
+        if not session_id:
+            return jsonify({"status": "error", "message": "session_id is required."}), 400
+        # Accept explicit booleans or yes/no/approve/deny text. Anything unclear -> DENY.
+        raw = data.get("approve", data.get("decision", data.get("answer")))
+        if isinstance(raw, bool):
+            approve = raw
+        else:
+            approve = str(raw or "").strip().lower() in ("yes", "y", "approve", "approved", "ok", "true", "1")
+        checkpoint = hitl.respond(session_id, approve, wait=float(data.get("wait", 45)))
+        return jsonify({"session_id": session_id, "approved": approve, **checkpoint})
+    except Exception:
+        log.exception("browser research respond failed")
+        return jsonify({"status": "error", "message": "Interactive research resume failed."}), 500
+
+
 # ── Status ────────────────────────────────────────────────────
 @app.route("/api/status", methods=["GET"])
 def status():
@@ -356,7 +549,7 @@ def status():
     Backward compatible: the original `ollama` and `models` fields are preserved.
     """
     provider, configured_model, startup_mode, live, ollama_online, models, model_available = \
-        _current_provider_model()
+        _current_provider_model(force_refresh=True)
 
     if startup_mode == "api":
         mode = "live"
