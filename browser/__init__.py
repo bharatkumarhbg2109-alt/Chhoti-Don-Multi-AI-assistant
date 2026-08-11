@@ -1,5 +1,19 @@
-"""Guarded, keyless web-search and page-reading capabilities."""
+"""Guarded, keyless web-search and page-reading capabilities.
 
-from .guarded import open_page, web_search
+Two complementary read-only layers, both behind the same Guardian gate:
+  * ddgs + trafilatura (search.py)      -> cheap static-page search + read
+  * Playwright headed browser (session) -> JS-heavy / render-required reads
+See routing.py for when to prefer which.
+"""
 
-__all__ = ["web_search", "open_page"]
+from .guarded import (
+    open_page, web_search,
+    browser_navigate, browser_read, browser_get_content,
+)
+from .routing import should_use_browser
+
+__all__ = [
+    "web_search", "open_page",
+    "browser_navigate", "browser_read", "browser_get_content",
+    "should_use_browser",
+]

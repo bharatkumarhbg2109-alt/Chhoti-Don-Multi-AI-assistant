@@ -1,0 +1,5 @@
+# Persistent browser profile reserved for later phases (no login data this phase).
+.userdata/
+# Byte-compiled
+__pycache__/
+*.pyc

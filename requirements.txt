@@ -5,3 +5,4 @@ googletrans==4.0.0-rc1
 requests
 ddgs
 trafilatura
+playwright  # headed/headless Chromium for JS-heavy read-only research (browser/ pkg). After install run: python -m playwright install chromium

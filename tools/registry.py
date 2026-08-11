@@ -4,7 +4,10 @@ from tools.calculator import run_calculator
 from tools.file_reader import read_file
 from tools.sandbox import run_python
 from tools.search import search_web
-from browser.guarded import web_search, open_page
+from browser.guarded import (
+    web_search, open_page,
+    browser_navigate, browser_read, browser_get_content,
+)
 from tools.image_analyzer import analyze_image
 from tools.feature_builder import (
     feature_builder,
@@ -72,6 +75,12 @@ class ToolRegistry:
             # browser.search's raw blocking functions.
             "web_search": web_search,
             "open_page": open_page,
+            # Playwright headed browser — READ-ONLY research (Phase 1). Guarded
+            # wrappers only; for JS-heavy / render-required pages (open_page is
+            # the cheaper static path for ordinary pages). See browser/routing.py.
+            "browser_navigate": browser_navigate,
+            "browser_read": browser_read,
+            "browser_get_content": browser_get_content,
             "analyze_image": analyze_image,
             "run_python": run_python,
             "port_scan": self._run_port_scan,
@@ -104,6 +113,24 @@ class ToolRegistry:
             "open_page": {
                 "name": "open_page",
                 "description": "Read one specific http(s) URL and return clean text as untrusted data for citation.",
+                "args": {"url": "string"},
+            },
+            "browser_read": {
+                "name": "browser_read",
+                "description": ("Open a REAL headed browser, render a JS-heavy page and return its "
+                                "clean readable text as untrusted data. Read-only; no clicking/typing. "
+                                "Use only for pages open_page cannot render, or when the user asks to "
+                                "'open the browser'."),
+                "args": {"url": "string"},
+            },
+            "browser_navigate": {
+                "name": "browser_navigate",
+                "description": "Open a REAL headed browser and navigate to an http(s) URL; return the page title and final URL. Read-only.",
+                "args": {"url": "string"},
+            },
+            "browser_get_content": {
+                "name": "browser_get_content",
+                "description": "Render a page in a REAL headed browser and return a compact markdown outline of its accessibility tree (untrusted). Read-only.",
                 "args": {"url": "string"},
             },
             "analyze_image": {

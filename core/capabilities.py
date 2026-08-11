@@ -33,6 +33,10 @@ def get_capabilities() -> List[Dict]:
     coding_ok = _importable("tools.registry", "ToolRegistry")
     vision_ok = _importable("tools.image_analyzer", "analyze_image")
     web_ok = _importable("browser.guarded", "web_search")
+    # Playwright headed browser (read-only research). Available only when both the
+    # guarded wrappers import AND the optional playwright package is present.
+    browser_ok = (_importable("browser.guarded", "browser_read")
+                  and _importable("playwright"))
     cyber_ok = _importable("cyber_engine.cyber_controller", "CyberController")
     heal_ok = _importable("cyber_engine.code_intelligence.code_controller", "run_code_intelligence")
     # New local voice package (faster-whisper STT + Piper TTS), wired to the UI
@@ -96,6 +100,19 @@ def get_capabilities() -> List[Dict]:
             "available": web_ok,
             "category": "Web",
             "description": "Keyless web search + page reading (guarded). Ask to 'web search ...' or 'open page <url>'.",
+            "risk_level": "low",
+            "requires_confirmation": False,
+            "view": "assistant",
+        },
+        {
+            "id": "browser_automation",
+            "name": "Browser (read-only)",
+            "available": browser_ok,
+            "category": "Web",
+            "description": ("Headed Playwright browser for JS-heavy pages: the assistant opens a "
+                            "real Chromium window, navigates and extracts readable content. "
+                            "Phase 1 is READ-ONLY (no clicking/typing/logins). Complements the "
+                            "keyless static web search."),
             "risk_level": "low",
             "requires_confirmation": False,
             "view": "assistant",
