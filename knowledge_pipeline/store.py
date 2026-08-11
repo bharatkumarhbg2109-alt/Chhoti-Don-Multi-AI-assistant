@@ -31,9 +31,26 @@ class OllamaError(RuntimeError):
 # --------------------------------------------------------------------------- #
 # ChromaDB helpers
 # --------------------------------------------------------------------------- #
+# Process-level singletons for the DEFAULT (no-override) client + collection.
+# Constructing a PersistentClient and re-fetching the collection cost ~200ms on
+# every retrieve_context() call; building them once and reusing removes that
+# per-message overhead. Parameterized calls (custom client/db_path/name — used by
+# the ingest pipeline and tests) bypass the cache and behave exactly as before.
+_default_client = None
+_default_collection = None
+
+
 def get_client(db_path: str | None = None):
-    """Create an on-disk (persistent) ChromaDB client."""
-    db_path = db_path or config.DB_PATH
+    """Create an on-disk (persistent) ChromaDB client.
+
+    The default-path client is cached and reused; an explicit ``db_path`` always
+    returns a fresh client (unchanged behavior for tests/ingest).
+    """
+    global _default_client
+    if db_path is None:
+        if _default_client is None:
+            _default_client = chromadb.PersistentClient(path=config.DB_PATH)
+        return _default_client
     return chromadb.PersistentClient(path=db_path)
 
 
@@ -43,7 +60,18 @@ def get_collection(client=None, db_path: str | None = None, name: str | None = N
 
     The cosine space keeps distances in [0, 2] where 0 == identical, which is
     what NOVELTY_THRESHOLD is calibrated against.
+
+    The default collection (no client/db_path/name override) is built once and
+    reused across calls; parameterized calls are not cached.
     """
+    global _default_collection
+    if client is None and db_path is None and name is None:
+        if _default_collection is None:
+            _default_collection = get_client().get_or_create_collection(
+                name=config.COLLECTION_NAME,
+                metadata={"hnsw:space": config.DISTANCE_METRIC},
+            )
+        return _default_collection
     client = client or get_client(db_path)
     name = name or config.COLLECTION_NAME
     return client.get_or_create_collection(
@@ -68,7 +96,9 @@ def embed_text(text: str) -> list[float]:
     try:
         resp = requests.post(
             url,
-            json={"model": config.EMBED_MODEL, "prompt": text},
+            # keep_alive=-1 keeps nomic-embed resident so it doesn't cold-reload
+            # each turn; it (~0.3GB) coexists with qwen3.5 (~5.5GB) in 8GB VRAM.
+            json={"model": config.EMBED_MODEL, "prompt": text, "keep_alive": -1},
             timeout=config.OLLAMA_TIMEOUT,
         )
         resp.raise_for_status()
