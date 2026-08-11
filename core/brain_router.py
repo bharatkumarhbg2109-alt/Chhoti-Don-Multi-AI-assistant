@@ -21,7 +21,7 @@ from core.brain_registry import (
 )
 from core.config import Config
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 OLLAMA_TIMEOUT = 120
 
 # ==================================================
@@ -314,7 +314,7 @@ def check_ollama_status() -> dict:
 
     try:
         import requests as req
-        response = req.get("http://localhost:11434/api/tags", timeout=5)
+        response = req.get("http://127.0.0.1:11434/api/tags", timeout=5)
         if response.status_code == 200:
             models = response.json().get("models", [])
             model_names = [m.get("name", "") for m in models]

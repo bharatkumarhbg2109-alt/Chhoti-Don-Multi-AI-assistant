@@ -21,7 +21,7 @@ _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 # --------------------------------------------------------------------------- #
 # Host of the local Ollama server. Override with the OLLAMA_HOST env var if
 # Ollama listens somewhere other than the default.
-OLLAMA_HOST: str = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_HOST: str = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
 
 # Chat model used to generate answers at query time (RAG).
 # Set to the locally-installed qwen model (the assistant's main conversation

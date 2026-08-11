@@ -49,7 +49,7 @@ DEFAULT_CONFIG = {
     # --------------------------------------------------
     "brain": {
         "default_model": "qwen3.5:latest",
-        "ollama_url": "http://localhost:11434/api/generate",
+        "ollama_url": "http://127.0.0.1:11434/api/generate",
         "timeout": 120,
         "temperature": 0.7,
         "max_tokens": 2048,

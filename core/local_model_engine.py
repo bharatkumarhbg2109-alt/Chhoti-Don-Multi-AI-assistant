@@ -44,7 +44,7 @@ def _execute_via_api(model: str, prompt: str, system: str = "", temperature: flo
             payload["system"] = system
 
         response = requests.post(
-            "http://localhost:11434/api/generate",
+            "http://127.0.0.1:11434/api/generate",
             json=payload,
             timeout=120,
         )
@@ -80,7 +80,7 @@ def list_available_models() -> Dict:
     """Available Ollama models list karo."""
     try:
         import requests
-        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        response = requests.get("http://127.0.0.1:11434/api/tags", timeout=5)
         if response.status_code == 200:
             models = response.json().get("models", [])
             return {
