@@ -499,12 +499,15 @@ class ManagerAgent:
 
         user_lang = detect_language(task)
 
-        # Phase-2 opt-in: an EXPLICIT "open the browser and research X" request runs
-        # the read-only multi-step browser agent. The trigger is deliberately narrow
-        # (see browser.routing.is_browser_research_request) so every ordinary chat /
-        # coding / RAG message falls straight through to the unchanged logic below.
+        # Phase-4 opt-in: an EXPLICIT shopping request ("Flipkart pe mouse dhundo")
+        # runs the read-only search+present shopping flow. Phase-2: "open the browser
+        # and research X" runs the read-only research agent. Both triggers are
+        # deliberately narrow so every ordinary chat / coding / RAG message falls
+        # straight through to the unchanged logic below.
         try:
-            from browser.routing import is_browser_research_request
+            from browser.routing import is_browser_research_request, is_shopping_request
+            if is_shopping_request(task):
+                return self.shopping_task(task)
             if is_browser_research_request(task):
                 return self.research_task(task)
         except Exception:
@@ -620,6 +623,54 @@ class ManagerAgent:
             "stopped": res["stopped"],
             "total_ms": res["total_ms"],
             "trace": res["trace"],
+        }
+
+    # --------------------------------------------------
+    # Shopping assist (Phase 4 — READ-ONLY search + present)
+    # --------------------------------------------------
+    def shopping_task(self, goal: str) -> dict:
+        """READ-ONLY half of the shopping flow: parse the request, open the site's
+        search, and present a structured product list for the user to choose from.
+        Adding to cart is a separate HITL-confirmed step (browser.browser_add_to_cart
+        / the /api/browser/research interactive endpoint); payment is never
+        automated. Sync + read-only, so it's safe on the normal chat path.
+        """
+        from browser import shopping
+        from browser.guarded import browser_search_products
+        shopping.reset_cart()
+
+        site, query = shopping.parse_shopping_request(goal)
+        url = shopping.build_search_url(query, site)
+        res = browser_search_products({"url": url})
+
+        if res.get("status") == "handoff":
+            out = (f"⚠️ {res.get('reason', 'verification')} — the site needs a human "
+                   f"(login/CAPTCHA). Please open {res.get('url', url)} and sign in / "
+                   "clear the check in the browser window, then ask me again.")
+            products = []
+        elif res.get("status") == "success":
+            products = res.get("products", []) or []
+            if products:
+                lines = [f"{i + 1}. {p['title']} — {p['price']}"
+                         + (f" ({p['rating']})" if p.get("rating") else "")
+                         + f"\n   {p['url']}" for i, p in enumerate(products[:10])]
+                out = (f"🛍️ Found {len(products)} products for “{query}”. Pick one and I can "
+                       "open it and (with your confirmation) add it to the cart — I never "
+                       "pay or checkout.\n\n" + "\n".join(lines))
+            else:
+                out = f"Couldn't extract products from {url}. Try a different query or site."
+        else:
+            out = (f"Shopping search failed ({res.get('marker', 'error')}). "
+                   f"{res.get('message', '')}").strip()
+            products = []
+
+        return {
+            "agent": "ShoppingAssistant",
+            "language": detect_language(goal),
+            "thinking": f"read-only shopping search for '{query}' (site={site or 'default'})",
+            "output": out,
+            "products": products,
+            "search_url": url,
         }
 
     # --------------------------------------------------

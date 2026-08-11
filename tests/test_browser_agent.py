@@ -101,9 +101,12 @@ class ActionSurfaceTests(unittest.TestCase):
                  ".drag_to(", ".hover(", "mouse.", "keyboard.")
 
     def test_action_set_is_read_plus_gated_interactive(self):
-        self.assertEqual(set(A.READ_ACTIONS), {"search", "navigate", "read_page", "get_content"})
+        # Read set incl. Phase-4 read-only product search.
+        self.assertEqual(set(A.READ_ACTIONS),
+                         {"search", "navigate", "read_page", "get_content", "search_products"})
+        # Interactive set incl. Phase-4 add_to_cart (HIGH, gated).
         self.assertEqual(set(A.INTERACTIVE_ACTIONS),
-                         {"click", "type_text", "select_option", "press_key"})
+                         {"click", "type_text", "select_option", "press_key", "add_to_cart"})
         self.assertIn("finish", A.AGENT_ACTIONS)
 
     def test_parser_accepts_interactive_actions_but_rejects_unknown(self):

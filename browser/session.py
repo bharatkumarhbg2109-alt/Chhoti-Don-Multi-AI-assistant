@@ -182,6 +182,17 @@ class BrowserSession:
         await self._page.screenshot(path=path, full_page=False)
         return path
 
+    async def extract_products(self) -> list:
+        """READ-ONLY: parse the current page into a structured product list
+        [{title, price, rating, url}] using per-site selectors (generic fallback)."""
+        from . import shopping
+        cfg = shopping.selectors_for(self._page.url)
+        try:
+            rows = await self._page.evaluate(shopping.PRODUCT_EXTRACT_JS, cfg or {})
+        except Exception:
+            rows = []
+        return shopping.clean_products(rows or [])
+
     # ── Interaction (Phase 3) — STATE-CHANGING, gate-guarded upstream ──────────
     # These perform real interactions and are reached ONLY through the guarded
     # wrappers in browser.guarded, which classify risk, HARD-BLOCK CRITICAL, and
@@ -368,7 +379,7 @@ async def _interact_async(url, action, target, value, key, headless):
     try:
         await session.launch()
         await session.navigate(url)
-        if action == "click":
+        if action in ("click", "add_to_cart"):
             res = await session.click(target)
         elif action == "type_text":
             res = await session.type_text(target, value)
@@ -381,6 +392,39 @@ async def _interact_async(url, action, target, value, key, headless):
         return {"status": "success", "action": action, **res}
     finally:
         await session.close()
+
+
+async def _search_products_async(url, headless):
+    from . import shopping
+    session = BrowserSession(headless=headless)
+    try:
+        await session.launch()
+        nav = await session.navigate(url)
+        # Bot-wall / login-wall / CAPTCHA -> hand off to the human (never bypass).
+        text = await session.extract_text()
+        reason = shopping.detect_bot_wall(text, nav["url"])
+        if reason:
+            return {"status": "handoff", "marker": "BOT_WALL", "reason": reason,
+                    "url": nav["url"], "title": nav["title"]}
+        products = await session.extract_products()
+        return {"status": "success", "url": nav["url"], "title": nav["title"],
+                "products": products}
+    finally:
+        await session.close()
+
+
+def search_products(url: str, headless: Optional[bool] = None) -> Dict[str, Any]:
+    """One-shot READ-ONLY product search: open -> navigate(search URL) -> detect
+    bot-wall (handoff if any) -> extract a structured product list -> close."""
+    timeout_s = OPERATION_TIMEOUT_MS / 1000.0
+    try:
+        return _run(asyncio.wait_for(_search_products_async(url, headless), timeout=timeout_s))
+    except PlaywrightNotInstalled as exc:
+        return {"status": "error", "marker": "PLAYWRIGHT_NOT_INSTALLED", "message": str(exc)}
+    except asyncio.TimeoutError:
+        return {"status": "error", "marker": "PAGE_TIMEOUT", "url": url}
+    except Exception as exc:
+        return {"status": "error", "marker": "SEARCH_FAILED", "url": url, "message": str(exc)}
 
 
 def do_action(url: str, action: str, target=None, value=None, key=None,

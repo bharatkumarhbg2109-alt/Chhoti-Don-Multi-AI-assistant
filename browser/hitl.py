@@ -33,17 +33,33 @@ logger = logging.getLogger("chhoti.browser.hitl")
 # ── Risk tiers ────────────────────────────────────────────────────────────────
 READ_ACTIONS = {"search", "navigate", "read_page", "get_content", "extract_text", "finish"}
 MEDIUM_ACTIONS = {"type_text", "select_option"}
-HIGH_ACTIONS = {"click", "press_key"}
+# add_to_cart (Phase 4) is a HIGH click: the cart is the permitted ceiling.
+HIGH_ACTIONS = {"click", "press_key", "add_to_cart"}
 
 # Text/URL that marks a payment/checkout/order action -> CRITICAL hard-block.
+# Phase 4: "add to cart" is DELIBERATELY NOT here — the cart is the ceiling and
+# add-to-cart is a HIGH (confirmable) action. Everything PAST the cart stays
+# CRITICAL. Extended with shopping-specific labels (Flipkart/Amazon/generic).
 CRITICAL_KEYWORDS = (
-    "submit", "checkout", "check out", "pay", "payment", "place order",
-    "place-order", "placeorder", "order now", "confirm order", "confirm purchase",
-    "complete order", "complete purchase", "purchase", "buy now", "buy",
-    "add to cart", "proceed to checkout", "billing", "place bid", "submit order",
+    "submit", "checkout", "check out", "go to checkout", "proceed to checkout",
+    "continue to checkout", "pay", "payment", "pay now", "proceed to pay",
+    "proceed to buy", "continue to payment", "make payment", "pay securely",
+    "place order", "place-order", "placeorder", "place your order", "order now",
+    "confirm order", "confirm purchase", "complete order", "complete purchase",
+    "purchase", "buy now", "buy", "billing", "place bid", "submit order",
+    "cash on delivery", "net banking",
 )
 COMMERCE_URL_HINTS = ("/checkout", "/cart", "/payment", "/billing", "/order",
-                      "/pay", "/buy", "/purchase")
+                      "/pay", "/buy", "/purchase", "/wallet", "/addresses")
+
+# Fields we must NEVER type into (credentials / payment / personal data). Typing
+# into any of these is CRITICAL -> hard-blocked; login is a manual human handoff.
+CREDENTIAL_FIELD_PATTERNS = (
+    "password", "passwd", "pwd", "otp", "one-time", "one time", "cvv", "cvc",
+    "security code", "card number", "cardnumber", "card no", "credit card",
+    "debit card", "expiry", "expiration", "upi", "vpa", "pin", "account number",
+    "aadhaar", "aadhar", "ssn", "passport", "netbanking", "net banking",
+)
 
 
 def _target_text(target: Any) -> str:
@@ -60,6 +76,11 @@ def _has_identifier(target: Any) -> bool:
     return bool(str(target or "").strip())
 
 
+def _is_credential_field(target: Any) -> bool:
+    tgt = _target_text(target)
+    return any(p in tgt for p in CREDENTIAL_FIELD_PATTERNS)
+
+
 def _is_critical(action: str, target: Any, value: Any, url: str) -> bool:
     hay = f"{_target_text(target)} {str(value or '').lower()} {str(url or '').lower()}"
     if any(k in hay for k in CRITICAL_KEYWORDS):
@@ -67,10 +88,14 @@ def _is_critical(action: str, target: Any, value: Any, url: str) -> bool:
     low_url = str(url or "").lower()
     if any(h in low_url for h in COMMERCE_URL_HINTS):
         return True
-    # AMBIGUOUS -> fail safe to CRITICAL: never act on a state-changing target we
-    # cannot even identify.
-    if action in (MEDIUM_ACTIONS | HIGH_ACTIONS) and not _has_identifier(target):
-        return True
+    if action in (MEDIUM_ACTIONS | HIGH_ACTIONS):
+        # Never type into a credential/payment/personal field (fail-safe CRITICAL).
+        if _is_credential_field(target):
+            return True
+        # AMBIGUOUS -> fail safe to CRITICAL: never act on a state-changing target
+        # we cannot even identify.
+        if not _has_identifier(target):
+            return True
     return False
 
 

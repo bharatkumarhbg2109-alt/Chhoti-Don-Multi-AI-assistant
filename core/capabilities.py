@@ -44,6 +44,10 @@ def get_capabilities() -> List[Dict]:
     interact_ok = (_importable("browser.guarded", "browser_click")
                    and _importable("browser.hitl", "confirm")
                    and _importable("playwright"))
+    # Phase 4: shopping assist (search + present + gated add-to-cart; no payment).
+    shopping_ok = (_importable("browser.guarded", "browser_add_to_cart")
+                   and _importable("browser.shopping", "detect_bot_wall")
+                   and _importable("playwright"))
     cyber_ok = _importable("cyber_engine.cyber_controller", "CyberController")
     heal_ok = _importable("cyber_engine.code_intelligence.code_controller", "run_code_intelligence")
     # New local voice package (faster-whisper STT + Piper TTS), wired to the UI
@@ -146,6 +150,19 @@ def get_capabilities() -> List[Dict]:
                             "human-in-the-loop confirmation gate: the agent proposes each risky action "
                             "and executes ONLY after explicit approval. Payment/checkout/submit are "
                             "hard-blocked. Opt-in via /api/browser/research(+/respond)."),
+            "risk_level": "high",
+            "requires_confirmation": True,
+            "view": "assistant",
+        },
+        {
+            "id": "browser_shopping",
+            "name": "Shopping Assist (cart is the ceiling)",
+            "available": shopping_ok,
+            "category": "Web",
+            "description": ("Search a shopping site, present a structured product list, open a chosen "
+                            "product, and — with per-step HITL confirmation — add to cart. Payment / "
+                            "checkout / buy-now is ALWAYS hard-blocked and handed to the human; never "
+                            "handles cards/OTP/passwords. Opt-in via an explicit shopping request."),
             "risk_level": "high",
             "requires_confirmation": True,
             "view": "assistant",

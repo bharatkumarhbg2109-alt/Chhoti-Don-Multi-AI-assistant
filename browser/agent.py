@@ -40,8 +40,8 @@ logger = logging.getLogger("chhoti.browser.agent")
 # actions are HITL-gated inside the guarded wrappers (CRITICAL hard-blocked,
 # MEDIUM/HIGH require explicit approval). Every action maps to a GUARDED wrapper —
 # never the raw session — so browser.guarded stays the authoritative enforcement.
-READ_ACTIONS = ("search", "navigate", "read_page", "get_content")
-INTERACTIVE_ACTIONS = ("click", "type_text", "select_option", "press_key")
+READ_ACTIONS = ("search", "navigate", "read_page", "get_content", "search_products")
+INTERACTIVE_ACTIONS = ("click", "type_text", "select_option", "press_key", "add_to_cart")
 AGENT_ACTIONS = READ_ACTIONS + INTERACTIVE_ACTIONS + ("finish",)
 # Backward-compatible alias kept for the read subset used elsewhere.
 READ_ONLY_ACTIONS = READ_ACTIONS + ("finish",)
@@ -61,6 +61,12 @@ def _dispatch(tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
         return guarded.browser_read({"url": str(args.get("url", "")).strip()})
     if tool == "get_content":
         return guarded.browser_get_content({"url": str(args.get("url", "")).strip()})
+    if tool == "search_products":
+        return guarded.browser_search_products({"url": str(args.get("url", "")).strip()})
+    if tool == "add_to_cart":
+        return guarded.browser_add_to_cart({"url": str(args.get("url", "")).strip(),
+                                            "target": args.get("target"),
+                                            "product": args.get("product", args.get("value"))})
     # ── State-changing (HITL-gated inside the guarded wrappers) ──
     if tool == "click":
         return guarded.browser_click({"url": str(args.get("url", "")).strip(),
@@ -131,6 +137,18 @@ def _summarize(tool: str, result: Dict[str, Any], obs_chars: int) -> str:
         return "\n".join(lines)[:obs_chars]
     if tool == "navigate":
         return f"title={result.get('title', '')} url={result.get('url', '')}"[:obs_chars]
+    if tool == "search_products":
+        if result.get("status") == "handoff":
+            return f"HANDOFF ({result.get('reason', '')}): human action required at {result.get('url', '')}"
+        prods = result.get("products", []) or []
+        if not prods:
+            return "No products extracted."
+        lines = [f"{i + 1}. {p.get('title', '')} | {p.get('price', '')} | "
+                 f"{p.get('rating', '')} | {p.get('url', '')}" for i, p in enumerate(prods[:10])]
+        return "\n".join(lines)[:obs_chars]
+    if tool == "add_to_cart":
+        return (f"add_to_cart status={result.get('status')} "
+                f"cart_count={result.get('cart_count', '')} marker={result.get('marker', '')}")[:obs_chars]
     if tool in ("click", "press_key"):
         return (f"{tool} ok -> url={result.get('url', '')} "
                 f"title={result.get('title', '')}")[:obs_chars]

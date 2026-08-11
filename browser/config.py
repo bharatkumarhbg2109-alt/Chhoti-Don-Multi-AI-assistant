@@ -62,3 +62,9 @@ AGENT_MAX_PARSE_RETRIES = int(os.environ.get("CHHOTI_DON_AGENT_MAX_PARSE_RETRIES
 # FAILS SAFE to DENY. Kept short-ish so a forgotten confirmation can't wedge a
 # background worker forever.
 HITL_CONFIRM_TIMEOUT_S = float(os.environ.get("CHHOTI_DON_HITL_TIMEOUT_S", "120"))
+
+
+# ── Shopping assist (Phase 4) ─────────────────────────────────────────────────
+# Cap on add-to-cart actions per shopping task so a mis-planning loop can't
+# runaway-cart. Payment/checkout is ALWAYS hard-blocked regardless.
+MAX_CART_ADDITIONS = int(os.environ.get("CHHOTI_DON_MAX_CART_ADDS", "5"))

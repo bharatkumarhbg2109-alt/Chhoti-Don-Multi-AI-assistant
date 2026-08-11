@@ -13,6 +13,7 @@ from .config import BLOCKED_DOMAINS, RATE_LIMIT_PER_MIN, REQUIRE_CONFIRMATION
 from . import search as _raw_search
 from . import session as _raw_session
 from . import hitl
+from . import shopping
 
 logger = logging.getLogger("chhoti.browser")
 
@@ -215,3 +216,35 @@ def browser_press(input_data: Dict[str, Any]) -> Dict[str, Any]:
     d = input_data if isinstance(input_data, dict) else {}
     return _interactive_gate("press_key", str(d.get("url") or "").strip(),
                              target=d.get("target"), key=d.get("key", "Enter"))
+
+
+# ── Shopping assist (Phase 4) ─────────────────────────────────────────────────
+def browser_search_products(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """READ-ONLY product search: navigate a search-results URL and return a clean
+    structured product list (title/price/rating/link). Auto-allowed (goes through
+    the read gate); if a bot-wall/login-wall/CAPTCHA is hit it returns a handoff."""
+    data = input_data if isinstance(input_data, dict) else {"url": str(input_data)}
+    url = str(data.get("url") or "").strip()
+    return _guarded_browser("web_search_products", url, _raw_session.search_products)
+
+
+def browser_add_to_cart(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """HIGH-risk add-to-cart click behind HITL confirmation, with a per-task cap.
+    The cart is the CEILING — a payment/checkout target still classifies CRITICAL
+    and is hard-blocked; when the cap is reached we hand off to the human."""
+    d = input_data if isinstance(input_data, dict) else {}
+    url = str(d.get("url") or "").strip()
+    target = d.get("target") or {"text": "Add to cart"}
+    product = d.get("product") or d.get("value") or ""
+
+    # Cart cap first — no point proposing a confirmation we won't honor.
+    if not shopping.can_add_to_cart():
+        hitl.audit.info("BLOCK CART_CAP add_to_cart @ %s", _domain(url) or url)
+        return {"status": "error", "marker": "CART_CAP_REACHED",
+                "cart_count": shopping.cart_count(), "message": shopping.HANDOFF_PAYMENT}
+
+    result = _interactive_gate("add_to_cart", url, target=target, value=product)
+    if isinstance(result, dict) and result.get("status") == "success":
+        shopping.note_cart_addition()
+        result["cart_count"] = shopping.cart_count()
+    return result

@@ -63,6 +63,21 @@ def is_browser_research_request(text: str) -> bool:
     return any(phrase in t for phrase in _RESEARCH_TRIGGERS)
 
 
+# Phase 4 chat trigger: an explicit shopping request (a shopping site name or an
+# unambiguous shopping phrase). Deliberately narrow so ordinary chat never routes
+# into the shopping flow.
+_SHOPPING_SITES = ("flipkart", "amazon", "myntra", "ajio", "snapdeal", "meesho")
+_SHOPPING_PHRASES = ("add to cart", "shopping site", "shop for", "online shopping",
+                     "product list", "add to bag")
+
+
+def is_shopping_request(text: str) -> bool:
+    """True only for an explicit shopping request (opt-in). Ordinary chat/coding/
+    research messages never match, so the default paths are unchanged."""
+    t = (text or "").lower()
+    return any(s in t for s in _SHOPPING_SITES) or any(p in t for p in _SHOPPING_PHRASES)
+
+
 def should_use_browser(text: str = "", static_result: dict | None = None) -> bool:
     """Encode the routing rule. Returns True when the Playwright browser should be
     used instead of the cheap static path.
