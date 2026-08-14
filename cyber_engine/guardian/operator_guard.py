@@ -20,6 +20,17 @@ class OperatorGuard:
             "brain.py",
         }
 
+        # Read-only coding-agent filesystem actions. Like the "web_" read tools,
+        # these are LOW risk and auto-allow (no confirmation). Kept as an explicit
+        # allowlist — NOT a broad "fs_" prefix — so future state-changing actions
+        # (fs_write / fs_delete / fs_move …) stay OUT of the low tier and must be
+        # granted a confirmation path of their own.
+        self.readonly_fs_actions = {
+            "fs_list_dir",
+            "fs_read_file",
+            "fs_search",
+        }
+
     # -----------------------------------------
     # Check if action requires approval
     # -----------------------------------------
@@ -60,10 +71,11 @@ class OperatorGuard:
         and confirmation hook.
         """
         requires_confirmation = self.requires_approval(action_name)
+        is_low = action_name.startswith("web_") or action_name in self.readonly_fs_actions
         return {
             "action": action_name,
             "target": target,
-            "risk_level": "low" if action_name.startswith("web_") else "unknown",
-            "risk_score": 10 if action_name.startswith("web_") else 0,
+            "risk_level": "low" if is_low else "unknown",
+            "risk_score": 10 if is_low else 0,
             "requires_confirmation": requires_confirmation,
         }

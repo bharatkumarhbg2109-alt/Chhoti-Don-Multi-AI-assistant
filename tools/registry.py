@@ -15,6 +15,13 @@ from tools.feature_builder import (
     TOOL_DEFINITION as FEATURE_BUILDER_DEF,
 )
 
+# 💻 Coding-agent read-only workspace tools (Phase 1). Guarded wrappers only —
+# path-jailed through the WorkspaceSandbox and gated LOW-tier by the Guardian.
+from coding_agent.guarded import (
+    fs_list_dir, fs_read_file, fs_search,
+    grant_workspace as _grant_workspace,
+)
+
 # 🔎 Recon Imports
 from cyber_engine.recon.port_scanner import PortScanner
 from cyber_engine.recon.subdomain_scanner import SubdomainScanner
@@ -100,6 +107,16 @@ class ToolRegistry:
             # 🧩 Self-extension
             # ---------------------------
             "feature_builder": feature_builder,
+
+            # ---------------------------
+            # 💻 Coding Agent — read-only workspace (Phase 1)
+            # ---------------------------
+            # Path-jailed through the WorkspaceSandbox; Guardian assigns these the
+            # LOW risk tier (auto-allow), mirroring the read-only web_ tools. NO
+            # write/delete/shell capability exists in this phase.
+            "fs_list_dir": fs_list_dir,
+            "fs_read_file": fs_read_file,
+            "fs_search": fs_search,
         }
 
         # Add Nmap only if available
@@ -149,6 +166,27 @@ class ToolRegistry:
                 "args": {"image_path": "string (local file)", "prompt": "string (optional question about the image)"},
             },
             "feature_builder": FEATURE_BUILDER_DEF,
+            "fs_list_dir": {
+                "name": "fs_list_dir",
+                "description": ("List the directory tree of the granted code workspace (read-only). "
+                                "Skips heavy dirs (node_modules/.git/__pycache__/venv). A workspace "
+                                "must be granted first; every path is jailed to that folder."),
+                "args": {"path": "string (optional, relative to workspace root, default '.')",
+                         "max_depth": "integer (optional)"},
+            },
+            "fs_read_file": {
+                "name": "fs_read_file",
+                "description": ("Read a text file inside the granted workspace (read-only). Size-capped "
+                                "and returned line-numbered. Jailed to the workspace root."),
+                "args": {"path": "string (relative to workspace root)",
+                         "max_bytes": "integer (optional)"},
+            },
+            "fs_search": {
+                "name": "fs_search",
+                "description": ("Grep-style search across the granted workspace (read-only); returns "
+                                "file:line:match rows. Uses ripgrep if available. Jailed to the root."),
+                "args": {"query": "string", "glob": "string (optional file glob filter)"},
+            },
         }
 
         # Assistant-generated tools (added via feature_builder). Guarded so a
@@ -161,6 +199,18 @@ class ToolRegistry:
                 self.tool_definitions[_gname] = _gspec["definition"]
         except Exception:
             pass
+
+    # --------------------------------------------------
+    # 💻 Coding Agent — grant a workspace (control-plane)
+    # --------------------------------------------------
+    def grant_workspace(self, path):
+        """Grant a folder as the coding agent's jailed workspace root.
+
+        Not a LOW-tier model tool — this DEFINES the sandbox that the read-only
+        fs_* tools operate inside, so it is exposed as an explicit registry
+        method. Returns the resolved root or a structured error.
+        """
+        return _grant_workspace(path)
 
     # --------------------------------------------------
     # 📋 List Tools (Preserved)
