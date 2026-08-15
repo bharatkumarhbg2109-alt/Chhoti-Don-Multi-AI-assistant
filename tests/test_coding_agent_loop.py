@@ -131,14 +131,28 @@ class SafetyGuardTests(LoopBase):
         self.assertEqual(res["steps"], 2)
 
     def test_no_progress_breaks(self):
+        # The model IGNORES the one corrective nudge and keeps repeating -> break.
         same = _act("fs_create_file", path="a.py", content="1")
-        model = ScriptedModel([
-            _plan(("fs_create_file", {"path": "a.py"})),
-            same, same, same,
-        ])
+        model = ScriptedModel([_plan(("fs_create_file", {"path": "a.py"})), same],
+                              default=same)
         res = agent.CodingAgent(model, plan_approver=lambda p: True, max_steps=8).run("build")
         self.assertEqual(res["stopped"], "no_progress")
         self.assertIn("no progress", res["summary"].lower())
+
+    def test_nudge_lets_model_recover_and_finish(self):
+        # After the nudge, the model changes course and finishes -> success (proves
+        # exactly one corrective retry is granted before the break).
+        same = _act("fs_create_file", path="a.py", content="1")
+        model = ScriptedModel([
+            _plan(("fs_create_file", {"path": "a.py"})),
+            same,                       # step 1: creates a.py
+            same,                       # step 2: repeat -> triggers the nudge
+            '{"finish":"created a.py"}',  # step 3: recovers after the nudge
+        ])
+        res = agent.CodingAgent(model, plan_approver=lambda p: True, max_steps=8).run("build")
+        self.assertEqual(res["stopped"], "finish")
+        nudges = [t for t in res["trace"] if "nudge" in t]
+        self.assertEqual(len(nudges), 1)   # exactly one nudge
 
     def test_malformed_then_valid_triggers_corrective_retry(self):
         model = ScriptedModel([

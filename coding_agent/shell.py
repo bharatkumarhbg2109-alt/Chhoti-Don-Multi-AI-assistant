@@ -35,6 +35,8 @@ import shlex
 import subprocess
 from typing import Any, Callable, Dict, List, Optional
 
+from .sandbox import strip_bare_root
+
 logger = logging.getLogger("chhoti.coding_agent.shell")
 
 # Shell metacharacters that imply chaining / substitution / redirection / pipes.
@@ -102,6 +104,9 @@ def _arg_escapes_workspace(arg: str, workspace_root: Optional[str]) -> bool:
     known) resolves outside the workspace. Relative args are treated as in-cwd."""
     # Strip a leading =value (e.g. --out=/etc/x) and quotes.
     candidate = arg.split("=", 1)[1] if arg.startswith("--") and "=" in arg else arg
+    # A bare POSIX-root path (/x) is workspace-relative, not an escape; only a
+    # genuine drive-letter/UNC absolute survives normalization and is checked.
+    candidate = strip_bare_root(candidate)
     if not _looks_absolute(candidate):
         return False
     if _is_system_path(candidate):
@@ -145,7 +150,11 @@ def classify(command: str, workspace_root: Optional[str] = None) -> Dict[str, An
         return _mk("CRITICAL", "empty command", "", [])
 
     program = _basename(argv[0])
-    args = argv[1:]
+    # Normalize bare-root path ARGS (/add.py -> add.py) so the command both
+    # classifies AND RUNS relative to the workspace. Drive-letter/UNC absolutes
+    # are left intact and still blocked below. argv[0] (the program) is untouched.
+    args = [strip_bare_root(a) for a in argv[1:]]
+    argv = [argv[0]] + args  # what the executor will run
 
     # 3) any absolute/system path argument outside the workspace -> CRITICAL
     for a in args:

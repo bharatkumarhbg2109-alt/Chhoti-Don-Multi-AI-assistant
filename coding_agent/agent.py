@@ -38,7 +38,7 @@ from . import guarded, hitl, server
 from .config import (AGENT_HEAL_BUDGET, AGENT_MAX_OBS, AGENT_MAX_PARSE_RETRIES,
                      AGENT_MAX_REPEAT, AGENT_MAX_STEPS, AGENT_OBS_CHARS,
                      AGENT_READ_MAX_LINES, AGENT_SUMMARY_MAX_LINES)
-from .sandbox import SandboxViolation
+from .sandbox import SandboxViolation, strip_bare_root
 
 logger = logging.getLogger("chhoti.coding_agent.agent")
 
@@ -101,6 +101,13 @@ AGENT_SYSTEM_PROMPT = (
     "(you cannot auto-approve it). Use prod=true ONLY when the user explicitly asks "
     "to go to production. Never put secrets in files you deploy. Always report the "
     "deployed URL. "
+    "PATHS ARE RELATIVE to the workspace root: write 'src/app.py', NEVER '/src/app.py' "
+    "or an absolute path. After an action succeeds, do NOT repeat it — take the next "
+    "step, and once the whole task is done respond with finish. "
+    "EXAMPLE trajectory:\n"
+    'Step -> {"tool":"fs_create_file","args":{"path":"hello.txt","content":"hi\\n"}}\n'
+    "Observation -> wrote 3 bytes to hello.txt\n"
+    'Step -> {"finish":"Created hello.txt"}\n'
     "Always respond with STRICT JSON and nothing else — no prose, no code fences."
 )
 
@@ -220,6 +227,11 @@ def _parse_plan(raw: str) -> Optional[List[Dict[str, Any]]]:
         if not isinstance(args, dict):
             args = {k: v for k, v in item.items()
                     if k not in ("tool", "action", "note", "thought")}
+        # Normalize a bare-root path in the plan (/src -> src) so we stop echoing
+        # the model's own '/'-prefixed paths back at it, and so plan-scope matches
+        # the (normalized) paths the guarded layer will actually resolve to.
+        if isinstance(args.get("path"), str):
+            args = dict(args, path=strip_bare_root(args["path"]))
         plan.append({"tool": tool, "args": args, "note": str(item.get("note", ""))[:160]})
     return plan or None
 
@@ -452,6 +464,28 @@ class CodingAgent:
         if len(running_summary) > self.summary_max_lines:
             del running_summary[0]
 
+    def _nudge_hint(self, history) -> str:
+        """Pick a targeted corrective hint from the most recent observation."""
+        last = history[-1][1] if history else ""
+        low = last.lower()
+        if "sandbox_violation" in low or "critical_blocked" in low or "absolute" in low:
+            return ("The previous path/command was rejected as absolute. Retry using a path "
+                    "RELATIVE to the workspace root — never start a path with '/'.")
+        return ('The previous action already succeeded. If the task is complete, respond with '
+                '{"finish":"<summary>"}. Otherwise take a DIFFERENT next action.')
+
+    def _maybe_nudge(self, key, history, trace, step, nudged: set) -> bool:
+        """Inject ONE corrective observation for a stuck point. Returns True (caller
+        gives the model one more call) the first time; False (break) if already done."""
+        if key in nudged:
+            return False
+        nudged.add(key)
+        hint = self._nudge_hint(history)
+        history.append(({"tool": "(nudge)", "args": {}}, "NUDGE: " + hint))
+        trace.append({"step": step, "nudge": hint[:100]})
+        logger.info("[coding-agent] nudge step=%d: %s", step, hint[:80])
+        return True
+
     def run(self, task: str) -> Dict[str, Any]:
         t0 = time.perf_counter()
         trace: List[Dict[str, Any]] = []
@@ -494,6 +528,9 @@ class CodingAgent:
         # instead a command may be attempted at most `heal_budget` times.
         cmd_attempts: Dict[str, int] = {}
         commands: List[Dict[str, Any]] = []
+        # Stuck points already nudged once: a no-progress/heal break is delayed by
+        # EXACTLY ONE corrective model call, then it fires. Never an infinite loop.
+        nudged: set = set()
         parse_retries = 0
 
         for step in range(1, self.max_steps + 1):
@@ -532,6 +569,8 @@ class CodingAgent:
                 ncmd = _norm_cmd(args.get("command", args.get("cmd", "")))
                 cmd_attempts[ncmd] = cmd_attempts.get(ncmd, 0) + 1
                 if cmd_attempts[ncmd] > self.heal_budget:
+                    if self._maybe_nudge(("cmd", ncmd), history, trace, step, nudged):
+                        continue  # one corrective call before the break fires
                     trace.append({"step": step, "error": "heal_budget", "command": ncmd[:160]})
                     logger.info("[coding-agent] heal-budget break step=%d cmd=%r", step, ncmd)
                     return self._result(task, f"Stopped: heal budget exhausted for `{ncmd}` "
@@ -543,6 +582,8 @@ class CodingAgent:
                 sig = f"{tool}:{json.dumps(args, sort_keys=True, default=str)}"
                 sig_counts[sig] = sig_counts.get(sig, 0) + 1
                 if sig_counts[sig] > self.max_repeat:
+                    if self._maybe_nudge(("sig", sig), history, trace, step, nudged):
+                        continue  # one corrective call before the break fires
                     trace.append({"step": step, "error": "no_progress", "signature": sig[:160]})
                     logger.info("[coding-agent] no-progress break step=%d tool=%s", step, tool)
                     return self._result(task, f"Stopped: repeated the same action with no progress "
@@ -553,6 +594,9 @@ class CodingAgent:
             marker = result.get("marker") if isinstance(result, dict) else None
             gate = ("DENY:" + marker) if marker in _DENY_MARKERS else "ALLOW"
             obs = _summarize(tool, args, result, self.obs_chars, self.read_max_lines)
+            # A path/command rejected as absolute -> tell the model to go relative.
+            if marker in ("SANDBOX_VIOLATION", "CRITICAL_BLOCKED"):
+                obs += " | HINT: use a path RELATIVE to the workspace root (no leading '/')."
             logger.info("[coding-agent] step=%d tool=%s gate=%s arg=%s",
                         step, tool, gate, _arg_label(args))
             history.append((action, obs))

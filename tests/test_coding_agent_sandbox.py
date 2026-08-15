@@ -124,6 +124,29 @@ class WorkspaceSandboxSecurityTests(unittest.TestCase):
         finally:
             os.rmdir(sibling)
 
+    # ── Tuning pass 1: bare-root normalization (must NOT weaken the jail) ────────
+    def test_bare_root_path_normalized_to_relative(self):
+        # /src/app.py is treated as workspace-relative, resolving INSIDE the root.
+        self.assertEqual(self.sandbox.resolve("/src/app.py"),
+                         os.path.join(self.root, "src", "app.py"))
+        self.assertEqual(self.sandbox.resolve("/"), self.root)
+
+    def test_bare_root_with_traversal_still_escapes(self):
+        # Stripping the leading slash must NOT let '..' climb out — realpath
+        # containment still blocks it.
+        with self.assertRaises(SandboxViolation):
+            self.sandbox.resolve("/../../../etc/passwd")
+        with self.assertRaises(SandboxViolation):
+            self.sandbox.resolve("/../" + os.path.basename(self.outside) + "/secret.txt")
+
+    def test_drive_letter_absolute_still_blocked(self):
+        # Genuine drive-letter absolutes are NOT normalized -> still rejected.
+        if os.name == "nt":
+            for target in (r"C:\Windows\System32\drivers\etc\hosts",
+                           os.path.join(self.outside, "secret.txt")):
+                with self.assertRaises(SandboxViolation):
+                    self.sandbox.resolve(target)
+
     # ── escape class 3: symlink escape ──────────────────────────────────────────
     def test_symlink_escape_is_blocked(self):
         link = os.path.join(self.root, "escape_link")

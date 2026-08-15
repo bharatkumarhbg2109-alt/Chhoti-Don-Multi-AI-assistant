@@ -39,6 +39,30 @@ class SandboxViolation(Exception):
         self.resolved = resolved
 
 
+def strip_bare_root(path: str) -> str:
+    """Turn a BARE POSIX-root path into a workspace-relative one.
+
+    Local models routinely emit paths like ``/src/main.py`` meaning "under the
+    project root". A bare leading ``/`` (or lone ``\\``) has NO drive letter, so it
+    is treated as workspace-relative: the leading slash(es) are stripped. Genuine
+    drive-letter absolutes (``E:\\...``, ``C:/...``) and UNC paths (``\\\\server``,
+    ``//server``) are left UNCHANGED so they remain real escapes — the caller's
+    realpath-containment check still rejects them. This normalizes intent; it does
+    NOT weaken the jail (``/../../../etc/passwd`` becomes ``../../../etc/passwd``,
+    which realpath still resolves outside the root and blocks).
+    """
+    if not path:
+        return path
+    p = str(path)
+    if len(p) >= 2 and p[1] == ":":       # drive-letter absolute (E:\, C:/) -> leave
+        return p
+    if p[:2] in ("\\\\", "//"):           # UNC (\\server, //server) -> leave
+        return p
+    if p[:1] in ("/", "\\"):              # bare POSIX root -> workspace-relative
+        return p.lstrip("/\\")
+    return p
+
+
 class WorkspaceSandbox:
     """A path jail rooted at one granted folder.
 
@@ -92,10 +116,15 @@ class WorkspaceSandbox:
             SandboxViolation: if the resolved path escapes the root.
         """
         requested = "." if path is None else str(path)
-        # os.path.join drops the root if `requested` is absolute — that is
+        # Normalize a bare POSIX-root path (/src -> src) to workspace-relative
+        # FIRST; genuine drive-letter/UNC absolutes are left as-is and still fail
+        # the containment check below. `.. ` traversal survives normalization and
+        # is still caught by realpath containment.
+        normalized = strip_bare_root(os.path.expanduser(requested)) or "."
+        # os.path.join drops the root if `normalized` is (still) absolute — that is
         # intentional here: an absolute path outside the jail then fails the
         # containment check below rather than being silently re-rooted.
-        candidate = os.path.join(self.root, os.path.expanduser(requested))
+        candidate = os.path.join(self.root, normalized)
         real_path = os.path.realpath(candidate)
         if not self._is_within(real_path):
             raise SandboxViolation(
