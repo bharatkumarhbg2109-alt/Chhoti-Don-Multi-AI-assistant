@@ -50,9 +50,12 @@ FS_TOOLS = READ_TOOLS + WRITE_TOOLS
 # tests read cleanly (the only command path is this classified, gated tool).
 SHELL_TOOLS = ("sh_run",)
 # Phase 5: LOCAL background dev servers. serve_start is gated (reuses the shell
-# classifier); status/logs/stop are LOW. No tunnel/external/deploy exists.
+# classifier); status/logs/stop are LOW.
 SERVER_TOOLS = ("serve_start", "serve_status", "serve_logs", "serve_stop")
-AGENT_TOOLS = FS_TOOLS + SHELL_TOOLS + SERVER_TOOLS
+# Phase 6: PUBLIC deploy. deploy_check is read-only; deploy_run is ALWAYS an
+# individual human confirm (never auto-approved — see _react/_session_approver).
+DEPLOY_TOOLS = ("deploy_check", "deploy_run")
+AGENT_TOOLS = FS_TOOLS + SHELL_TOOLS + SERVER_TOOLS + DEPLOY_TOOLS
 
 _DENY_MARKERS = {"GUARDIAN_DENIED", "SANDBOX_VIOLATION", "NO_WORKSPACE",
                  "MISCONFIGURED_TIER", "WRITE_FAILED", "UNKNOWN_TOOL",
@@ -72,6 +75,7 @@ _ALIASES = {
     "start_server": "serve_start", "serve": "serve_start", "server_start": "serve_start",
     "server_status": "serve_status", "status": "serve_status",
     "server_logs": "serve_logs", "server_stop": "serve_stop", "stop_server": "serve_stop",
+    "deploy": "deploy_run", "publish": "deploy_run", "deploy_status": "deploy_check",
 }
 
 # System prompt for the coding brain — passed explicitly to think_fast so the
@@ -91,6 +95,12 @@ AGENT_SYSTEM_PROMPT = (
     "then re-run. Do not repeat a fix that already failed. When you serve_start a "
     "server, verify it is up with serve_status and report its local URL; do NOT stop "
     "a server the user asked to run. "
+    "DEPLOY: only on the user's EXPLICIT request. First deploy_check(platform) to "
+    "confirm the CLI is installed+authenticated, then deploy_run(platform) — which "
+    "defaults to a PREVIEW deploy and requires the user's individual confirmation "
+    "(you cannot auto-approve it). Use prod=true ONLY when the user explicitly asks "
+    "to go to production. Never put secrets in files you deploy. Always report the "
+    "deployed URL. "
     "Always respond with STRICT JSON and nothing else — no prose, no code fences."
 )
 
@@ -131,6 +141,12 @@ def _dispatch(tool: str, args: Dict[str, Any]) -> Dict[str, Any]:
                                    "tail": args.get("tail", args.get("tail_n", 50))})
     if tool == "serve_stop":
         return guarded.serve_stop({"id": args.get("id", args.get("server_id"))})
+    if tool == "deploy_check":
+        return guarded.deploy_check({"platform": args.get("platform", "")})
+    if tool == "deploy_run":
+        return guarded.deploy_run({"platform": args.get("platform", ""),
+                                   "prod": bool(args.get("prod", False)),
+                                   "acknowledge_secrets": bool(args.get("acknowledge_secrets", False))})
     return {"status": "error", "marker": "UNKNOWN_TOOL", "tool": tool}
 
 
@@ -265,6 +281,16 @@ def _summarize(tool: str, args: Dict[str, Any], result: Dict[str, Any],
         return "\n".join(result.get("lines", []) or [])[-obs_chars:]
     if tool == "serve_stop":
         return f"stopped server {result.get('id')}"
+    if tool == "deploy_check":
+        return (f"deploy_check {result.get('platform')}: installed={result.get('installed')} "
+                f"authed={result.get('authed')}. If missing: {result.get('install_hint')} / "
+                f"{result.get('auth_hint')}")[:obs_chars]
+    if tool == "deploy_run":
+        env = "PRODUCTION" if result.get("prod") else "preview"
+        if result.get("ok"):
+            return f"deployed ({env}) to {result.get('platform')} -> {result.get('url') or 'URL not detected'}"
+        return (f"deploy ({env}) FAILED on {result.get('platform')} exit={result.get('exit_code')}: "
+                f"{(result.get('stderr') or '').strip()[-obs_chars // 2:]}")[:obs_chars]
     return json.dumps(result)[:obs_chars]
 
 
@@ -290,6 +316,7 @@ class CodingAgent:
                  plan_approver: Optional[Callable[[List[Dict[str, Any]]], bool]] = None,
                  delete_approver: Optional[Callable[[Any], bool]] = None,
                  shell_approver: Optional[Callable[[Any], bool]] = None,
+                 deploy_approver: Optional[Callable[[Any], bool]] = None,
                  max_steps: int = AGENT_MAX_STEPS, obs_chars: int = AGENT_OBS_CHARS,
                  max_obs: int = AGENT_MAX_OBS, max_parse_retries: int = AGENT_MAX_PARSE_RETRIES,
                  max_repeat: int = AGENT_MAX_REPEAT, read_max_lines: int = AGENT_READ_MAX_LINES,
@@ -301,6 +328,9 @@ class CodingAgent:
         self.plan_approver = plan_approver or (lambda plan: False)
         self.delete_approver = delete_approver or hitl.deny_all
         self.shell_approver = shell_approver or hitl.deny_all
+        # Deploy is the payment-wall equivalent: default DENY, and it rides its own
+        # channel (hitl.confirm_deploy) so approve_all/session approval can't reach it.
+        self.deploy_approver = deploy_approver or hitl.deny_all
         self.max_steps = max(1, int(max_steps))
         self.obs_chars = obs_chars
         self.max_obs = max_obs
@@ -447,10 +477,14 @@ class CodingAgent:
         #    in-plan MEDIUM commands; HIGH + out-of-scope still confirm/deny).
         self._approved_paths = self._scope_paths(plan)
         self._approved_commands = self._scope_commands(plan)
+        self._run_deploys: List[Dict[str, Any]] = []
         history: List[Tuple[Dict, str]] = []
         running_summary: List[str] = []
         executed: List[Dict[str, Any]] = []
-        with hitl.use_approver(self._session_approver()):
+        # The session approver handles in-scope writes / in-plan shell + servers.
+        # Deploy is installed on a SEPARATE channel (individual, never approve_all).
+        with hitl.use_approver(self._session_approver()), \
+                hitl.use_deploy_approver(self.deploy_approver):
             return self._react(task, plan, history, running_summary, trace, executed, t0)
 
     def _react(self, task, plan, history, running_summary, trace, executed, t0) -> Dict[str, Any]:
@@ -527,6 +561,10 @@ class CodingAgent:
             if tool == "sh_run" and isinstance(result, dict):
                 commands.append({"command": result.get("command"),
                                  "exit_code": result.get("exit_code"), "gate": gate})
+            if tool == "deploy_run" and isinstance(result, dict) and result.get("status") == "success":
+                self._run_deploys.append({"platform": result.get("platform"),
+                                          "prod": result.get("prod"), "url": result.get("url"),
+                                          "ok": result.get("ok")})
             trace.append({"step": step, "action": tool, "args": args,
                           "gate": gate, "observation": obs[:300]})
 
@@ -559,6 +597,7 @@ class CodingAgent:
             "executed": executed,
             "commands": commands or [],
             "servers": servers,
+            "deploys": getattr(self, "_run_deploys", []),
             "trace": trace,
             "total_ms": round((time.perf_counter() - t0) * 1000, 1),
         }

@@ -24,8 +24,9 @@ from typing import Any, Dict, Optional
 
 from cyber_engine.guardian.operator_guard import OperatorGuard
 
-from . import edits, hitl, server, shell, tools
-from .config import SHELL_OUTPUT_CAP, SHELL_TIMEOUT_S
+from . import deploy, edits, hitl, server, shell, tools
+from .config import (DEPLOY_OUTPUT_CAP, DEPLOY_TIMEOUT_S,
+                     SHELL_OUTPUT_CAP, SHELL_TIMEOUT_S)
 from .sandbox import SandboxViolation, WorkspaceSandbox
 
 logger = logging.getLogger("chhoti.coding_agent")
@@ -398,3 +399,105 @@ def serve_stop(input_data: Dict[str, Any]) -> Dict[str, Any]:
     if not sid:
         return {"status": "error", "marker": "MISSING_ID", "message": "A server 'id' is required."}
     return server.stop(sid)
+
+
+# ── DEPLOY path (Phase 6: PUBLIC deploy — highest risk, always confirm) ───────
+# The payment-wall equivalent. Deploy is NEVER auto-approved: it rides a SEPARATE
+# approval channel (hitl.confirm_deploy / _deploy_approver) that approve_all and
+# the plan-scope session approver cannot satisfy. Order:
+#   1. require a granted workspace (cwd pinned to its root)
+#   2. resolve the platform adapter
+#   3. SECRET PREFLIGHT — if secrets would be uploaded and it is not explicitly
+#      acknowledged, BLOCK before any prompt
+#   4. individual human confirm (confirm_deploy); PRODUCTION requires a SECOND
+#      explicit confirmation
+#   5. only then run the CLI via shell.run (shell=False, cwd pinned), parse the URL
+# The agent stores no tokens — it relies on the CLI's own pre-existing auth state.
+def deploy_check(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """LOW/read-only: is the platform CLI installed and already authenticated?"""
+    data = input_data if isinstance(input_data, dict) else {"platform": str(input_data)}
+    platform = str(data.get("platform") or data.get("input") or "").strip()
+    if not platform:
+        return {"status": "error", "marker": "MISSING_PLATFORM",
+                "message": "A 'platform' is required (e.g. vercel/netlify/github-pages)."}
+    if _workspace is None:
+        return {"status": "error", "marker": "NO_WORKSPACE",
+                "message": "No workspace granted. Call grant_workspace(path) first."}
+    return deploy.check(platform, cwd=_workspace.root, runner=shell.run,
+                        timeout=SHELL_TIMEOUT_S, output_cap=SHELL_OUTPUT_CAP)
+
+
+def deploy_run(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded PUBLIC deploy. ALWAYS individual human confirm (approve_all-exempt);
+    preview by default; production needs prod=True + an extra confirm; blocked if
+    secrets would be uploaded unless explicitly acknowledged."""
+    data = input_data if isinstance(input_data, dict) else {"platform": str(input_data)}
+    platform = str(data.get("platform") or "").strip()
+    if not platform:
+        return {"status": "error", "marker": "MISSING_PLATFORM",
+                "message": "A 'platform' is required."}
+    if _workspace is None:
+        return {"status": "error", "marker": "NO_WORKSPACE",
+                "message": "No workspace granted. Call grant_workspace(path) first."}
+
+    adapter = deploy.get_adapter(platform)
+    if adapter is None:
+        return {"status": "error", "marker": "UNKNOWN_PLATFORM", "platform": platform,
+                "known": deploy.list_platforms()}
+
+    prod = bool(data.get("prod", False))
+    acknowledged = bool(data.get("acknowledge_secrets", False))
+
+    # 3) SECRET PREFLIGHT — block by default if anything sensitive would upload.
+    preflight = deploy.secret_preflight(_workspace.root)
+    if not preflight["clean"] and not acknowledged:
+        hitl.audit.info("BLOCK SECRETS deploy %s findings=%d", platform,
+                        len(preflight["findings"]))
+        return {"status": "error", "marker": "SECRETS_DETECTED", "platform": platform,
+                "findings": preflight["findings"], "env_files": preflight["env_files"],
+                "message": ("Deploy blocked: secrets would be uploaded. Remove/ignore them "
+                            "(e.g. add .env to .vercelignore/.netlifyignore/.gitignore), or "
+                            "re-run with acknowledge_secrets=true to proceed anyway.")}
+
+    # Adapters without a preview (e.g. GitHub Pages) always publish LIVE.
+    effective_prod = prod or (not adapter.supports_preview)
+    command = " ".join(adapter.deploy_argv(effective_prod))
+    warn = "PUBLIC deploy — this is externally reachable."
+    if effective_prod:
+        warn = "PRODUCTION deploy — this replaces the LIVE site. " + warn
+    if not preflight["clean"]:
+        warn = "SECRETS present and acknowledged. " + warn
+
+    proposal = hitl.DeployProposal(platform=platform, command=command, prod=effective_prod,
+                                   secrets_found=not preflight["clean"],
+                                   secret_findings=preflight["findings"], warning=warn)
+    approved = hitl.confirm_deploy(proposal,
+                                   fallback=lambda p: _guardian.request_permission("deploy_run"))
+    logger.info("[coding-agent-guardian] deploy platform=%s prod=%s decision=%s",
+                platform, effective_prod, "APPROVE" if approved else "DENY")
+    if not approved:
+        return {"status": "error", "marker": "GUARDIAN_DENIED", "platform": platform,
+                "prod": effective_prod, "command": command}
+
+    # 4b) PRODUCTION requires a SECOND explicit confirmation.
+    if effective_prod:
+        final = hitl.DeployProposal(platform=platform, command=command, prod=True,
+                                    secrets_found=not preflight["clean"],
+                                    secret_findings=preflight["findings"], final=True,
+                                    warning="FINAL confirmation for a PRODUCTION/live deploy.")
+        if not hitl.confirm_deploy(final,
+                                   fallback=lambda p: _guardian.request_permission("deploy_run_prod")):
+            return {"status": "error", "marker": "GUARDIAN_DENIED", "platform": platform,
+                    "prod": True, "command": command, "stage": "production_final"}
+
+    # 5) run the CLI via the SAME executor as sh_run (shell=False, cwd pinned).
+    r = shell.run(adapter.deploy_argv(effective_prod), cwd=_workspace.root,
+                  timeout=DEPLOY_TIMEOUT_S, output_cap=DEPLOY_OUTPUT_CAP)
+    exit_code = r.get("exit_code")
+    url = adapter.parse_url(r.get("stdout", ""), r.get("stderr", ""))
+    hitl.audit.info("RESULT deploy %s prod=%s exit=%s url=%s",
+                    platform, effective_prod, exit_code, url)
+    return {"status": "success", "action": "deploy_run", "platform": platform,
+            "prod": effective_prod, "command": command, "exit_code": exit_code,
+            "ok": exit_code == 0, "url": url,
+            "stdout": r.get("stdout", ""), "stderr": r.get("stderr", "")}

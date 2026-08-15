@@ -245,16 +245,17 @@ class RegistryIntegrationTests(unittest.TestCase):
         self.assertTrue(registered.isdisjoint(forbidden),
                         f"unexpected raw shell/exec tool(s): {registered & set(forbidden)}")
 
-    def test_local_server_tools_exist_but_no_tunnel_or_deploy(self):
-        # Phase 5 adds LOCAL background servers via serve_*; there must be NO
-        # tunnel / external-hosting / deploy tool anywhere.
+    def test_local_server_and_deploy_tools_exist_but_no_tunnel(self):
+        # Phase 5 local servers + Phase 6 public deploy exist; but there must be NO
+        # tunnel / port-forward / ad-hoc public-exposure tool.
         registered = set(self.registry.list_tools())
-        for name in ("serve_start", "serve_status", "serve_logs", "serve_stop"):
+        for name in ("serve_start", "serve_status", "serve_logs", "serve_stop",
+                     "deploy_check", "deploy_run"):
             self.assertIn(name, registered)
-        forbidden = ("tunnel", "ngrok", "cloudflared", "deploy", "publish",
-                     "expose", "port_forward", "serve_public", "serve_remote")
+        forbidden = ("tunnel", "ngrok", "cloudflared", "port_forward",
+                     "serve_public", "serve_remote", "expose_port")
         offenders = [t for t in registered if any(b in t for b in forbidden)]
-        self.assertEqual(offenders, [], f"unexpected external/deploy tool(s): {offenders}")
+        self.assertEqual(offenders, [], f"unexpected tunnel/expose tool(s): {offenders}")
 
     def test_coding_agent_exposes_only_gated_shell(self):
         import coding_agent

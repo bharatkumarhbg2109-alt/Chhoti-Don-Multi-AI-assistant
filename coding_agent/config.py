@@ -88,3 +88,12 @@ SERVER_URL_DETECT_TIMEOUT_S = _env_int("CHHOTI_DON_CODE_SERVER_URL_TIMEOUT_S", 8
 SERVER_STOP_GRACE_S = _env_int("CHHOTI_DON_CODE_SERVER_STOP_GRACE_S", 5)
 # Timeout (seconds) for the localhost socket health probe.
 HEALTH_CHECK_TIMEOUT_S = _env_int("CHHOTI_DON_CODE_HEALTH_TIMEOUT_S", 2)
+
+
+# ── public deploy (Phase 6: FINAL capability — highest risk) ──────────────────
+# Deploys can be slow (build + upload); give the CLI a generous wall-clock cap.
+DEPLOY_TIMEOUT_S = _env_int("CHHOTI_DON_CODE_DEPLOY_TIMEOUT_S", 600)
+# Bytes kept from the deploy CLI's stdout/stderr (head+tail, middle truncated).
+DEPLOY_OUTPUT_CAP = _env_int("CHHOTI_DON_CODE_DEPLOY_OUTPUT_CAP", 16_000)
+# Per-file byte ceiling for the pre-deploy secret scan (skip large/binary files).
+SECRET_SCAN_MAX_FILE_BYTES = _env_int("CHHOTI_DON_CODE_SECRET_SCAN_BYTES", 1_000_000)

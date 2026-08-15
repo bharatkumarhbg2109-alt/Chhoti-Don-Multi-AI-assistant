@@ -22,7 +22,7 @@ from __future__ import annotations
 import contextvars
 import difflib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 audit = logging.getLogger("chhoti.coding_agent.audit")
@@ -83,6 +83,50 @@ class ShellProposal:
         prompt += "Reply approve / deny."
         return {"command": self.command, "tier": self.tier, "program": self.program,
                 "reason": self.reason, "warning": self.warning, "prompt": prompt}
+
+
+@dataclass
+class DeployProposal:
+    """A pending PUBLIC deploy awaiting an ALWAYS-individual human confirmation.
+
+    Deploy is the highest-risk action, so it rides a SEPARATE approval channel
+    (confirm_deploy / _deploy_approver) that the generic write/shell approver —
+    including approve_all — can never satisfy. That is the structural guarantee
+    that a deploy is never auto-approved."""
+
+    platform: str
+    command: str
+    prod: bool = False
+    secrets_found: bool = False
+    secret_findings: list = field(default_factory=list)
+    final: bool = False   # the extra confirmation required for a production deploy
+    warning: str = ""
+
+    @property
+    def tier(self) -> str:
+        return "DEPLOY"
+
+    def describe(self) -> str:
+        env = "PRODUCTION" if self.prod else "preview"
+        extra = " [FINAL PRODUCTION CONFIRM]" if self.final else ""
+        sec = f" ⚠ SECRETS×{len(self.secret_findings)}" if self.secrets_found else ""
+        return f"DEPLOY[{env}] {self.platform}: {self.command}{extra}{sec}"
+
+    @property
+    def diff(self) -> str:  # uniform render surface
+        lines = [f"$ {self.command}",
+                 f"target: {'PRODUCTION (live)' if self.prod else 'preview'}"]
+        if self.secrets_found:
+            lines.append("SECRET PREFLIGHT — these would be uploaded:")
+            lines += [f"  - {f.get('file')} ({f.get('pattern', f.get('type'))})"
+                      for f in self.secret_findings]
+        return "\n".join(lines)
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {"platform": self.platform, "command": self.command, "prod": self.prod,
+                "secrets_found": self.secrets_found, "secret_findings": self.secret_findings,
+                "final": self.final, "warning": self.warning,
+                "prompt": f"Approve this deploy?\n{self.diff}\nReply approve / deny."}
 
 
 def unified_diff(old: str, new: str, path: str, *, context: int = 3) -> str:
@@ -162,6 +206,57 @@ def confirm(proposal: Any,
     try:
         decision = bool(fn(proposal))
     except Exception as exc:  # any approver/fallback error -> deny (fail safe)
+        audit.info("DECISION DENY (%s error: %s) %s", source, exc, proposal.describe())
+        return False
+
+    audit.info("DECISION %s (%s) %s",
+               "APPROVE" if decision else "DENY", source, proposal.describe())
+    return decision
+
+
+# ── deploy approval: a SEPARATE channel (never the generic _approver) ─────────
+# Deploy MUST be individually confirmed every time — even under approve_all and
+# even inside an approved build session. Using a distinct ContextVar makes it
+# structurally impossible for the write/shell approver to auto-approve a deploy.
+_deploy_approver: "contextvars.ContextVar[Optional[Callable[[DeployProposal], bool]]]" = \
+    contextvars.ContextVar("deploy_approver", default=None)
+
+
+class use_deploy_approver:
+    """Install the (individual) deploy approver for the current context."""
+
+    def __init__(self, fn: Callable[[DeployProposal], bool]):
+        self._fn = fn
+
+    def __enter__(self):
+        self._token = _deploy_approver.set(self._fn)
+        return self
+
+    def __exit__(self, *exc):
+        _deploy_approver.reset(self._token)
+        return False
+
+
+def confirm_deploy(proposal: DeployProposal,
+                   fallback: Optional[Callable[[DeployProposal], bool]] = None) -> bool:
+    """Approval point for a deploy. Consults ONLY the deploy channel (never the
+    generic approver), then a fallback (the Guardian's human prompt), else denies."""
+    audit.info("PROPOSE %s", proposal.describe())
+    _render(proposal)
+
+    fn = _deploy_approver.get()
+    if fn is not None:
+        source = "deploy_approver"
+    elif fallback is not None:
+        fn = fallback
+        source = "fallback"
+    else:
+        audit.info("DECISION DENY (no deploy approver/fallback) %s", proposal.describe())
+        return False
+
+    try:
+        decision = bool(fn(proposal))
+    except Exception as exc:  # fail safe
         audit.info("DECISION DENY (%s error: %s) %s", source, exc, proposal.describe())
         return False
 

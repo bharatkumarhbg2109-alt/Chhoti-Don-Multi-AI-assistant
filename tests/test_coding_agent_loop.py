@@ -231,14 +231,15 @@ class TriggerGatingTests(unittest.TestCase):
 
 
 class ShellSurfaceTests(unittest.TestCase):
-    def test_agent_actions_are_fs_plus_gated_shell_and_local_servers(self):
-        # Non-fs actions are exactly the gated shell + the LOCAL server tools.
+    def test_agent_actions_are_fs_plus_shell_servers_and_deploy(self):
+        # Non-fs actions: gated shell + LOCAL servers + PUBLIC deploy (all gated).
         non_fs = sorted(t for t in agent.AGENT_TOOLS if not t.startswith("fs_"))
         self.assertEqual(non_fs, sorted(
-            ["sh_run", "serve_start", "serve_status", "serve_logs", "serve_stop"]))
-        # No raw exec/eval/spawn — and NO tunnel/deploy/external-hosting action.
+            ["sh_run", "serve_start", "serve_status", "serve_logs", "serve_stop",
+             "deploy_check", "deploy_run"]))
+        # No raw exec/eval/spawn — and NO tunnel / ad-hoc public-exposure action.
         banned = ("exec", "eval", "popen", "spawn", "subprocess", "system",
-                  "tunnel", "ngrok", "deploy", "publish", "expose", "cloudflare")
+                  "tunnel", "ngrok", "cloudflare", "port_forward")
         for t in agent.AGENT_TOOLS:
             self.assertFalse(any(b in t for b in banned), t)
 

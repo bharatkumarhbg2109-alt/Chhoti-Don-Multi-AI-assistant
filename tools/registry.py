@@ -25,6 +25,7 @@ from coding_agent.guarded import (
     fs_write_file, fs_create_file, fs_edit_file, fs_make_dir, fs_delete_file,
     sh_run,
     serve_start, serve_status, serve_logs, serve_stop,
+    deploy_check, deploy_run,
     grant_workspace as _grant_workspace,
 )
 # Phase 3: autonomous builder loop (fs_ tools only; NO shell). The loop dispatches
@@ -157,6 +158,15 @@ class ToolRegistry:
             "serve_status": serve_status,
             "serve_logs": serve_logs,
             "serve_stop": serve_stop,
+
+            # ---------------------------
+            # 💻 Coding Agent — PUBLIC deploy (Phase 6, highest risk)
+            # ---------------------------
+            # deploy_check is read-only (is the CLI installed + authed?). deploy_run
+            # is ALWAYS an individual human confirmation — never auto-approved, even
+            # under approve_all — with a secret preflight and a preview default.
+            "deploy_check": deploy_check,
+            "deploy_run": deploy_run,
 
             # ---------------------------
             # 💻 Coding Agent — autonomous builder loop (Phase 3)
@@ -302,6 +312,25 @@ class ToolRegistry:
                 "description": ("Stop a tracked local server (LOW; always allowed): graceful terminate "
                                 "then force-kill, and remove it from the registry."),
                 "args": {"id": "string (server id)"},
+            },
+            "deploy_check": {
+                "name": "deploy_check",
+                "description": ("Read-only: is the platform CLI installed and already authenticated? "
+                                "Platforms: vercel, netlify, github-pages. The agent never logs in or "
+                                "reads tokens — it relies on the CLI's own auth state."),
+                "args": {"platform": "string (vercel|netlify|github-pages)"},
+            },
+            "deploy_run": {
+                "name": "deploy_run",
+                "description": ("Deploy the workspace to a PUBLIC host via an already-authenticated "
+                                "platform CLI. ALWAYS requires an individual human confirmation (never "
+                                "auto-approved). Defaults to a PREVIEW deploy; prod=true does a "
+                                "PRODUCTION deploy with an extra confirmation. Blocked if secrets "
+                                "(.env/keys) would be uploaded unless acknowledge_secrets=true. Returns "
+                                "the deployed URL."),
+                "args": {"platform": "string (vercel|netlify|github-pages)",
+                         "prod": "boolean (optional; default false = preview)",
+                         "acknowledge_secrets": "boolean (optional; required to deploy despite secrets)"},
             },
             "fs_build": {
                 "name": "fs_build",
@@ -487,11 +516,17 @@ class ToolRegistry:
             print(f"\n[coding-agent] {proposal.tier}-risk command: {proposal.command}")
             return self._guard_confirm("fs_build_shell")
 
+        def _deploy_approver(proposal):
+            # Individual human confirm for EVERY deploy (production is asked twice).
+            print(f"\n[coding-agent] PUBLIC DEPLOY: {proposal.describe()}")
+            return self._guard_confirm("fs_build_deploy")
+
         kw = {}
         if input_data.get("max_steps") is not None:
             kw["max_steps"] = int(input_data["max_steps"])
         return _run_build(task, _think, plan_approver=_plan_approver,
                           delete_approver=_delete_approver, shell_approver=_shell_approver,
+                          deploy_approver=_deploy_approver,
                           workspace=input_data.get("workspace"), **kw)
 
     def _guard_confirm(self, action_name):
