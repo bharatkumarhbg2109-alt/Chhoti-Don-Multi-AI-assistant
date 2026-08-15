@@ -22,13 +22,27 @@ class OperatorGuard:
 
         # Read-only coding-agent filesystem actions. Like the "web_" read tools,
         # these are LOW risk and auto-allow (no confirmation). Kept as an explicit
-        # allowlist — NOT a broad "fs_" prefix — so future state-changing actions
-        # (fs_write / fs_delete / fs_move …) stay OUT of the low tier and must be
-        # granted a confirmation path of their own.
+        # allowlist — NOT a broad "fs_" prefix — so state-changing actions stay OUT
+        # of the low tier and must be granted a confirmation path of their own.
         self.readonly_fs_actions = {
             "fs_list_dir",
             "fs_read_file",
             "fs_search",
+        }
+
+        # State-changing coding-agent filesystem actions (Phase 2). These NEVER
+        # auto-allow — assess_action forces requires_confirmation=True so the
+        # guarded layer must obtain a human approval before committing.
+        #   MEDIUM: create/overwrite/edit content, make a directory.
+        #   HIGH  : delete a file (stronger warning in the confirm prompt).
+        self.medium_fs_actions = {
+            "fs_write_file",
+            "fs_create_file",
+            "fs_edit_file",
+            "fs_make_dir",
+        }
+        self.high_fs_actions = {
+            "fs_delete_file",
         }
 
     # -----------------------------------------
@@ -70,12 +84,20 @@ class OperatorGuard:
         existing Guardian so all executable capabilities have a common audit
         and confirmation hook.
         """
-        requires_confirmation = self.requires_approval(action_name)
-        is_low = action_name.startswith("web_") or action_name in self.readonly_fs_actions
+        # State-changing fs actions always require confirmation; other actions
+        # only if they are in the protected set.
+        if action_name in self.high_fs_actions:
+            risk_level, risk_score, requires_confirmation = "high", 80, True
+        elif action_name in self.medium_fs_actions:
+            risk_level, risk_score, requires_confirmation = "medium", 50, True
+        elif action_name.startswith("web_") or action_name in self.readonly_fs_actions:
+            risk_level, risk_score, requires_confirmation = "low", 10, self.requires_approval(action_name)
+        else:
+            risk_level, risk_score, requires_confirmation = "unknown", 0, self.requires_approval(action_name)
         return {
             "action": action_name,
             "target": target,
-            "risk_level": "low" if is_low else "unknown",
-            "risk_score": 10 if is_low else 0,
+            "risk_level": risk_level,
+            "risk_score": risk_score,
             "requires_confirmation": requires_confirmation,
         }

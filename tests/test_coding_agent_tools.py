@@ -197,12 +197,13 @@ class GuardianTierTests(unittest.TestCase):
             self.assertEqual(a["risk_score"], 10, action)
             self.assertFalse(a["requires_confirmation"], action)
 
-    def test_future_write_actions_are_not_low(self):
-        # Guards the safety posture: a hypothetical write/delete action must NOT
-        # inherit the low tier just by sharing an fs_ prefix.
-        for action in ("fs_write_file", "fs_delete", "fs_move", "fs_exec"):
+    def test_state_changing_fs_actions_are_never_low(self):
+        # Guards the safety posture: sharing an fs_ prefix must NOT grant the LOW
+        # (auto-allow) tier. Real writes are medium/high; unknown fs_ actions are
+        # "unknown" — but never "low".
+        for action in ("fs_write_file", "fs_delete_file", "fs_move", "fs_exec"):
             a = self.guard.assess_action(action, "x")
-            self.assertEqual(a["risk_level"], "unknown", action)
+            self.assertNotEqual(a["risk_level"], "low", action)
 
     def test_web_actions_still_low_regression(self):
         a = self.guard.assess_action("web_read", "https://example.com")
@@ -234,23 +235,37 @@ class RegistryIntegrationTests(unittest.TestCase):
         self.assertEqual(out["result"]["status"], "success")
         self.assertIn("Sample", out["result"]["content"])
 
-    def test_no_write_or_shell_tool_is_registered(self):
-        # Phase 1 must expose NO write/delete/move/shell capability.
-        forbidden = ("fs_write", "fs_write_file", "fs_delete", "fs_delete_folder",
-                     "fs_move", "fs_copy", "fs_rename", "fs_mkdir", "fs_exec",
-                     "fs_shell", "fs_run")
+    def test_only_gated_sh_run_shell_tool_exists(self):
+        # Phase 4 adds command execution — but ONLY through the gated, classified
+        # sh_run. No RAW/ungated exec tool may exist.
         registered = set(self.registry.list_tools())
+        self.assertIn("sh_run", registered)
+        forbidden = ("fs_exec", "fs_shell", "fs_system", "fs_spawn", "fs_popen",
+                     "fs_eval", "run_shell", "shell_exec", "exec_command", "raw_run")
         self.assertTrue(registered.isdisjoint(forbidden),
-                        f"unexpected write/shell tool(s): {registered & set(forbidden)}")
+                        f"unexpected raw shell/exec tool(s): {registered & set(forbidden)}")
 
-    def test_coding_agent_exposes_no_write_functions(self):
+    def test_local_server_tools_exist_but_no_tunnel_or_deploy(self):
+        # Phase 5 adds LOCAL background servers via serve_*; there must be NO
+        # tunnel / external-hosting / deploy tool anywhere.
+        registered = set(self.registry.list_tools())
+        for name in ("serve_start", "serve_status", "serve_logs", "serve_stop"):
+            self.assertIn(name, registered)
+        forbidden = ("tunnel", "ngrok", "cloudflared", "deploy", "publish",
+                     "expose", "port_forward", "serve_public", "serve_remote")
+        offenders = [t for t in registered if any(b in t for b in forbidden)]
+        self.assertEqual(offenders, [], f"unexpected external/deploy tool(s): {offenders}")
+
+    def test_coding_agent_exposes_only_gated_shell(self):
         import coding_agent
         exported = set(coding_agent.__all__)
-        banned_substrings = ("write", "delete", "remove", "move", "copy",
-                             "rename", "mkdir", "exec", "shell", "run", "chmod")
-        offenders = [n for n in exported
-                     if any(b in n.lower() for b in banned_substrings)]
-        self.assertEqual(offenders, [], f"unexpected mutating exports: {offenders}")
+        # The gated shell surface (sh_run) and the shell package are expected in
+        # Phase 4; what must NEVER appear is a RAW/ungated command-exec helper.
+        self.assertIn("sh_run", exported)
+        raw_exec = ("os_system", "system_call", "run_shell", "shell_exec",
+                    "exec_command", "raw_run", "popen", "subprocess_run", "spawn")
+        offenders = [n for n in exported if any(b in n.lower() for b in raw_exec)]
+        self.assertEqual(offenders, [], f"unexpected raw exec exports: {offenders}")
 
 
 if __name__ == "__main__":

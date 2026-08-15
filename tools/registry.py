@@ -15,12 +15,21 @@ from tools.feature_builder import (
     TOOL_DEFINITION as FEATURE_BUILDER_DEF,
 )
 
-# 💻 Coding-agent read-only workspace tools (Phase 1). Guarded wrappers only —
-# path-jailed through the WorkspaceSandbox and gated LOW-tier by the Guardian.
+# 💻 Coding-agent workspace tools. Guarded wrappers only — path-jailed through
+# the WorkspaceSandbox and risk-tiered by the Guardian.
+#   Phase 1 (read-only, LOW/auto-allow): list_dir / read_file / search.
+#   Phase 2 (writes): write/create/edit/make_dir (MEDIUM) + delete (HIGH), each
+#   behind a diff-previewing human confirmation — never auto-allow.
 from coding_agent.guarded import (
     fs_list_dir, fs_read_file, fs_search,
+    fs_write_file, fs_create_file, fs_edit_file, fs_make_dir, fs_delete_file,
+    sh_run,
+    serve_start, serve_status, serve_logs, serve_stop,
     grant_workspace as _grant_workspace,
 )
+# Phase 3: autonomous builder loop (fs_ tools only; NO shell). The loop dispatches
+# through the same guarded wrappers above, so the choke point stays in path.
+from coding_agent.agent import run_build as _run_build, AGENT_SYSTEM_PROMPT as _CODE_AGENT_SYS
 
 # 🔎 Recon Imports
 from cyber_engine.recon.port_scanner import PortScanner
@@ -112,11 +121,50 @@ class ToolRegistry:
             # 💻 Coding Agent — read-only workspace (Phase 1)
             # ---------------------------
             # Path-jailed through the WorkspaceSandbox; Guardian assigns these the
-            # LOW risk tier (auto-allow), mirroring the read-only web_ tools. NO
-            # write/delete/shell capability exists in this phase.
+            # LOW risk tier (auto-allow), mirroring the read-only web_ tools.
             "fs_list_dir": fs_list_dir,
             "fs_read_file": fs_read_file,
             "fs_search": fs_search,
+
+            # ---------------------------
+            # 💻 Coding Agent — workspace writes (Phase 2)
+            # ---------------------------
+            # Path-jailed AND gated: MEDIUM (write/create/edit/make_dir) or HIGH
+            # (delete), each shows a unified diff and REQUIRES human confirmation —
+            # never auto-allow. Still NO shell/exec capability.
+            "fs_write_file": fs_write_file,
+            "fs_create_file": fs_create_file,
+            "fs_edit_file": fs_edit_file,
+            "fs_make_dir": fs_make_dir,
+            "fs_delete_file": fs_delete_file,
+
+            # ---------------------------
+            # 💻 Coding Agent — gated shell (Phase 4)
+            # ---------------------------
+            # Classified + gated command execution (test/build/install/lint/git).
+            # CRITICAL commands are hard-blocked (never run); HIGH need individual
+            # confirmation; MEDIUM auto-run only inside an approved plan. cwd is
+            # pinned to the workspace, shell=False, hard timeout, bounded output.
+            "sh_run": sh_run,
+
+            # ---------------------------
+            # 💻 Coding Agent — LOCAL background servers (Phase 5)
+            # ---------------------------
+            # serve_start launches a long-lived local dev server (gated like sh_run:
+            # allowlisted->MEDIUM, else HIGH, CRITICAL blocked); status/logs/stop are
+            # LOW. Local only — NO tunnel/external/deploy. Tracked + atexit-reaped.
+            "serve_start": serve_start,
+            "serve_status": serve_status,
+            "serve_logs": serve_logs,
+            "serve_stop": serve_stop,
+
+            # ---------------------------
+            # 💻 Coding Agent — autonomous builder loop (Phase 3)
+            # ---------------------------
+            # Turns a task into a plan of fs_ actions, shows the plan once for
+            # approval, then executes via the guarded write path. fs_ tools ONLY —
+            # NO shell/command execution.
+            "fs_build": self._run_fs_build,
         }
 
         # Add Nmap only if available
@@ -186,6 +234,83 @@ class ToolRegistry:
                 "description": ("Grep-style search across the granted workspace (read-only); returns "
                                 "file:line:match rows. Uses ripgrep if available. Jailed to the root."),
                 "args": {"query": "string", "glob": "string (optional file glob filter)"},
+            },
+            "fs_write_file": {
+                "name": "fs_write_file",
+                "description": ("Create or OVERWRITE a file in the granted workspace with full content. "
+                                "MEDIUM risk: shows a unified diff and REQUIRES human confirmation. "
+                                "Atomic (temp+rename), UTF-8, jailed to the workspace root."),
+                "args": {"path": "string (relative to workspace root)", "content": "string"},
+            },
+            "fs_create_file": {
+                "name": "fs_create_file",
+                "description": ("Create a NEW file (fails if it already exists) in the workspace. "
+                                "MEDIUM risk: diff shown, human confirmation required. Atomic + jailed."),
+                "args": {"path": "string (relative to workspace root)", "content": "string"},
+            },
+            "fs_edit_file": {
+                "name": "fs_edit_file",
+                "description": ("Surgically replace text in a workspace file: old_str must match EXACTLY "
+                                "once (fails on 0 or >1). MEDIUM risk: diff shown, confirmation required."),
+                "args": {"path": "string", "old_str": "string (must match once)", "new_str": "string"},
+            },
+            "fs_make_dir": {
+                "name": "fs_make_dir",
+                "description": ("Create a directory (parents allowed) in the workspace. MEDIUM risk: "
+                                "confirmation required. Jailed to the workspace root."),
+                "args": {"path": "string (relative to workspace root)"},
+            },
+            "fs_delete_file": {
+                "name": "fs_delete_file",
+                "description": ("Delete a single file in the workspace. HIGH risk: shows the removed "
+                                "content as a diff and requires confirmation with a stronger warning. "
+                                "Jailed; refuses directories."),
+                "args": {"path": "string (relative to workspace root)"},
+            },
+            "sh_run": {
+                "name": "sh_run",
+                "description": ("Run ONE dev command to completion in the workspace (tests/build/"
+                                "install/lint/git). Classified by risk: CRITICAL (rm -rf, sudo, pipes, "
+                                "system paths) is HARD-BLOCKED; HIGH (rm, git push/reset --hard, unknown "
+                                "programs) needs confirmation; MEDIUM (pytest/npm/pip/git status…) auto-"
+                                "runs only inside an approved plan. shell=False, cwd pinned, hard timeout, "
+                                "bounded output. Cannot start servers or deploy."),
+                "args": {"command": "string (a single command, no shell metacharacters)"},
+            },
+            "serve_start": {
+                "name": "serve_start",
+                "description": ("Start a LOCAL long-lived dev server as a background process "
+                                "(e.g. 'npm run dev', 'python -m http.server 8000'). Gated like "
+                                "sh_run (allowlisted->MEDIUM, else HIGH; CRITICAL blocked). Detects "
+                                "and returns the local URL. Local only — no tunnel/deploy. cwd pinned, "
+                                "shell=False. Returns a server id; stop it with serve_stop."),
+                "args": {"command": "string (dev server command)"},
+            },
+            "serve_status": {
+                "name": "serve_status",
+                "description": ("Check a tracked local server (LOW): alive?, localhost health probe, "
+                                "detected URL, and a recent log tail."),
+                "args": {"id": "string (server id from serve_start)"},
+            },
+            "serve_logs": {
+                "name": "serve_logs",
+                "description": "Return the captured stdout/stderr tail of a tracked local server (LOW).",
+                "args": {"id": "string (server id)", "tail": "integer (optional, lines)"},
+            },
+            "serve_stop": {
+                "name": "serve_stop",
+                "description": ("Stop a tracked local server (LOW; always allowed): graceful terminate "
+                                "then force-kill, and remove it from the registry."),
+                "args": {"id": "string (server id)"},
+            },
+            "fs_build": {
+                "name": "fs_build",
+                "description": ("Autonomous coding builder: turn a natural-language task into a plan "
+                                "of file actions, show the plan ONCE for approval, then scaffold/edit "
+                                "the project via the guarded fs_ tools. Read+write files ONLY — it "
+                                "cannot run, install, or execute anything. Requires a granted workspace."),
+                "args": {"task": "string (what to build)",
+                         "workspace": "string (optional folder to grant as the jail root)"},
             },
         }
 
@@ -326,6 +451,56 @@ class ToolRegistry:
             kw["max_steps"] = int(input_data["max_steps"])
         res = run_research(goal, think_fn=_think, synth_fn=_synth, **kw)
         return {"status": "success", **res}
+
+    # ==================================================
+    # 💻 CODING AGENT — AUTONOMOUS BUILDER (Phase 3)
+    # ==================================================
+    def _run_fs_build(self, input_data):
+        """Run the coding builder loop. Requires a brain for the coding model;
+        every file action goes through the guarded fs_ path (NO shell). The plan
+        is shown ONCE and approved via the Guardian's human confirm; HIGH-risk
+        deletes confirm individually."""
+        task = str(input_data.get("task") or input_data.get("input") or "").strip()
+        if not task:
+            return {"status": "error", "marker": "EMPTY_TASK",
+                    "message": "A build task is required."}
+        if self.brain is None:
+            return {"status": "error", "marker": "NO_BRAIN",
+                    "message": "Coding brain unavailable."}
+
+        def _think(prompt):
+            return self.brain.think_fast(
+                prompt, brain_type="coding", num_predict=512,
+                system_prompt=_CODE_AGENT_SYS)
+
+        def _plan_approver(plan):
+            print("\n[coding-agent] Proposed build plan:")
+            for i, a in enumerate(plan, 1):
+                print(f"  {i}. {a['tool']} {a.get('args', {})}")
+            return self._guard_confirm("fs_build_plan")
+
+        def _delete_approver(proposal):
+            print(f"\n[coding-agent] HIGH-risk delete: {proposal.path}")
+            return self._guard_confirm("fs_build_delete")
+
+        def _shell_approver(proposal):
+            print(f"\n[coding-agent] {proposal.tier}-risk command: {proposal.command}")
+            return self._guard_confirm("fs_build_shell")
+
+        kw = {}
+        if input_data.get("max_steps") is not None:
+            kw["max_steps"] = int(input_data["max_steps"])
+        return _run_build(task, _think, plan_approver=_plan_approver,
+                          delete_approver=_delete_approver, shell_approver=_shell_approver,
+                          workspace=input_data.get("workspace"), **kw)
+
+    def _guard_confirm(self, action_name):
+        """Human confirm via the shared Guardian (blocking input); fail-safe deny."""
+        from cyber_engine.guardian.operator_guard import OperatorGuard
+        try:
+            return OperatorGuard().request_permission(action_name)
+        except Exception:
+            return False
 
     # ==================================================
     # 💻 CODING ENGINE WRAPPERS

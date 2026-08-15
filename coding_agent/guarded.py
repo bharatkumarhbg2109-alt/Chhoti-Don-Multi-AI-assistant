@@ -24,7 +24,8 @@ from typing import Any, Dict, Optional
 
 from cyber_engine.guardian.operator_guard import OperatorGuard
 
-from . import tools
+from . import edits, hitl, server, shell, tools
+from .config import SHELL_OUTPUT_CAP, SHELL_TIMEOUT_S
 from .sandbox import SandboxViolation, WorkspaceSandbox
 
 logger = logging.getLogger("chhoti.coding_agent")
@@ -133,3 +134,267 @@ def fs_search(input_data: Dict[str, Any]) -> Dict[str, Any]:
     glob = str(glob) if glob else None
     return _run("fs_search", query,
                 lambda sb: tools.search(sb, query=query, glob=glob))
+
+
+# ── WRITE path (Phase 2: MEDIUM/HIGH, HITL-confirmed, diff previewed) ──────────
+# This is the AUTHORITATIVE enforcement point for state-changing filesystem
+# actions — NOT the LLM prompt. Order is fail-safe:
+#   1. require a granted workspace
+#   2. PLAN through the sandbox (resolve+validate) — a jail escape raises here,
+#      BEFORE any confirmation prompt or disk mutation
+#   3. Guardian assessment must mark the action confirm-required (never auto-allow)
+#   4. HITL confirm() shows the unified diff and consults the approver; with no
+#      approver it falls back to the Guardian's blocking request_permission(),
+#      and with neither it FAILS SAFE to deny
+#   5. only on explicit approval does commit_plan() apply the (atomic) change
+def _confirm_and_commit(plan) -> Dict[str, Any]:
+    assessment = _guardian.assess_action(plan.action, plan.rel_path)
+    # Defensive: a write tool must be a confirm-required tier. If some future
+    # miswiring made it auto-allow, refuse rather than silently mutate.
+    if not assessment["requires_confirmation"]:
+        return {"status": "error", "marker": "MISCONFIGURED_TIER",
+                "action": plan.action, "guardian": assessment}
+
+    proposal = hitl.WriteProposal(action=plan.action, tier=plan.tier, path=plan.rel_path,
+                                  summary=plan.summary, diff=plan.diff, warning=plan.warning)
+    approved = hitl.confirm(proposal,
+                            fallback=lambda p: _guardian.request_permission(p.action))
+    logger.info("[coding-agent-guardian] action=%s path=%s tier=%s risk=%s decision=%s",
+                plan.action, plan.rel_path, plan.tier, assessment["risk_level"],
+                "APPROVE" if approved else "DENY")
+    if not approved:
+        return {"status": "error", "marker": "GUARDIAN_DENIED", "tier": plan.tier,
+                "action": plan.action, "path": plan.rel_path, "diff": plan.diff}
+
+    try:
+        result = edits.commit_plan(_workspace, plan)
+    except SandboxViolation as exc:  # re-resolve caught an escape at commit time
+        logger.warning("[coding-agent-guardian] SANDBOX_VIOLATION (commit) action=%s -> %s",
+                       plan.action, exc)
+        return {"status": "error", "marker": "SANDBOX_VIOLATION", "message": str(exc),
+                "requested": exc.requested, "resolved": exc.resolved}
+    except OSError as exc:
+        return {"status": "error", "marker": "WRITE_FAILED", "message": str(exc),
+                "action": plan.action, "path": plan.rel_path}
+    hitl.audit.info("RESULT %s -> %s", proposal.describe(),
+                    result.get("status") if isinstance(result, dict) else result)
+    return result
+
+
+def _run_write(action: str, path: str, plan_fn) -> Dict[str, Any]:
+    """Require a workspace, PLAN (jail escapes raise here before any prompt), then
+    confirm+commit. Semantic errors from the plan short-circuit without prompting."""
+    if _workspace is None:
+        return {"status": "error", "marker": "NO_WORKSPACE",
+                "message": "No workspace granted. Call grant_workspace(path) first."}
+    try:
+        outcome = plan_fn(_workspace)
+    except SandboxViolation as exc:
+        logger.warning("[coding-agent-guardian] SANDBOX_VIOLATION action=%s target=%s -> %s",
+                       action, path, exc)
+        return {"status": "error", "marker": "SANDBOX_VIOLATION", "message": str(exc),
+                "requested": exc.requested, "resolved": exc.resolved}
+    if "error" in outcome:
+        return outcome["error"]
+    return _confirm_and_commit(outcome["plan"])
+
+
+def fs_write_file(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded create-or-overwrite. MEDIUM risk — requires confirmation."""
+    data = input_data if isinstance(input_data, dict) else {"path": str(input_data)}
+    path = str(data.get("path") or data.get("file_path") or "")
+    if not path:
+        return {"status": "error", "marker": "MISSING_PATH",
+                "message": "A 'path' is required for fs_write_file."}
+    content = data.get("content", data.get("text", ""))
+    return _run_write("fs_write_file", path,
+                      lambda sb: edits.plan_write_file(sb, path, content))
+
+
+def fs_create_file(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded create-if-absent. MEDIUM risk — requires confirmation."""
+    data = input_data if isinstance(input_data, dict) else {"path": str(input_data)}
+    path = str(data.get("path") or data.get("file_path") or "")
+    if not path:
+        return {"status": "error", "marker": "MISSING_PATH",
+                "message": "A 'path' is required for fs_create_file."}
+    content = data.get("content", data.get("text", ""))
+    return _run_write("fs_create_file", path,
+                      lambda sb: edits.plan_create_file(sb, path, content))
+
+
+def fs_edit_file(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded surgical edit (old_str must match exactly once). MEDIUM risk."""
+    data = input_data if isinstance(input_data, dict) else {}
+    path = str(data.get("path") or data.get("file_path") or "")
+    if not path:
+        return {"status": "error", "marker": "MISSING_PATH",
+                "message": "A 'path' is required for fs_edit_file."}
+    old_str = data.get("old_str", data.get("old"))
+    new_str = data.get("new_str", data.get("new", ""))
+    return _run_write("fs_edit_file", path,
+                      lambda sb: edits.plan_edit_file(sb, path, old_str, new_str))
+
+
+def fs_make_dir(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded directory creation (parents ok). MEDIUM risk — requires confirmation."""
+    data = input_data if isinstance(input_data, dict) else {"path": str(input_data)}
+    path = str(data.get("path") or "")
+    if not path:
+        return {"status": "error", "marker": "MISSING_PATH",
+                "message": "A 'path' is required for fs_make_dir."}
+    return _run_write("fs_make_dir", path, lambda sb: edits.plan_make_dir(sb, path))
+
+
+def fs_delete_file(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded single-file delete. HIGH risk — requires confirmation."""
+    data = input_data if isinstance(input_data, dict) else {"path": str(input_data)}
+    path = str(data.get("path") or data.get("file_path") or "")
+    if not path:
+        return {"status": "error", "marker": "MISSING_PATH",
+                "message": "A 'path' is required for fs_delete_file."}
+    return _run_write("fs_delete_file", path, lambda sb: edits.plan_delete_file(sb, path))
+
+
+# ── SHELL path (Phase 4: run-to-completion dev commands, classified + gated) ──
+# The AUTHORITATIVE enforcement point for command execution — NOT the LLM prompt.
+# Fail-safe order:
+#   1. require a granted workspace (cwd is pinned to its root)
+#   2. classify the command WITHOUT running it (coding_agent.shell.classify)
+#   3. CRITICAL -> HARD BLOCK: never runs, never even offered for confirmation
+#   4. HIGH/MEDIUM -> hitl.confirm (session approver auto-runs only in-plan MEDIUM;
+#      HIGH always confirms individually; no approver -> Guardian request_permission;
+#      neither -> fail-safe DENY)
+#   5. only on approval does the argv list run with shell=False, cwd pinned, a hard
+#      timeout, and bounded output.
+# NOTE: cwd-pinning is a guardrail, not a sandbox — a launched process can still
+# read outside cwd. The real defenses are the classifier + CRITICAL block + HIGH
+# confirm + shell=False + timeout. See coding_agent/shell.py.
+def _run_shell(command: str) -> Dict[str, Any]:
+    if _workspace is None:
+        return {"status": "error", "marker": "NO_WORKSPACE",
+                "message": "No workspace granted. Call grant_workspace(path) first."}
+
+    cls = shell.classify(command, workspace_root=_workspace.root)
+    tier = cls["tier"]
+
+    if cls["critical"]:
+        hitl.audit.info("BLOCK CRITICAL sh_run `%s` (%s)", command, cls["reason"])
+        logger.info("[coding-agent-guardian] sh_run tier=CRITICAL decision=BLOCKED cmd=%r reason=%s",
+                    command, cls["reason"])
+        return {"status": "error", "marker": "CRITICAL_BLOCKED", "tier": "CRITICAL",
+                "command": command, "reason": cls["reason"],
+                "message": "This command is hard-blocked and is never run or offered for confirmation."}
+
+    warning = ("Runs to completion in the workspace; may modify files or install "
+               "third-party code." if tier == "HIGH" else "")
+    proposal = hitl.ShellProposal(command=command, tier=tier,
+                                  program=cls["program"], reason=cls["reason"], warning=warning)
+    approved = hitl.confirm(proposal,
+                            fallback=lambda p: _guardian.request_permission("sh_run"))
+    logger.info("[coding-agent-guardian] sh_run tier=%s decision=%s cmd=%r",
+                tier, "APPROVE" if approved else "DENY", command)
+    if not approved:
+        return {"status": "error", "marker": "GUARDIAN_DENIED", "tier": tier,
+                "command": command, "reason": cls["reason"]}
+
+    try:
+        r = shell.run(cls["argv"], cwd=_workspace.root,
+                      timeout=SHELL_TIMEOUT_S, output_cap=SHELL_OUTPUT_CAP)
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"status": "error", "marker": "SHELL_FAILED", "message": str(exc),
+                "command": command}
+    exit_code = r.get("exit_code")
+    hitl.audit.info("RESULT sh_run `%s` -> exit=%s timed_out=%s",
+                    command, exit_code, r.get("timed_out"))
+    # The gate ALLOWED the run; a non-zero exit is a legitimate result (e.g. tests
+    # failed), surfaced via exit_code/stderr for the self-heal loop — not a gate deny.
+    return {"status": "success", "action": "sh_run", "command": command, "tier": tier,
+            "exit_code": exit_code, "ok": exit_code == 0,
+            "timed_out": r.get("timed_out", False),
+            "stdout": r.get("stdout", ""), "stderr": r.get("stderr", "")}
+
+
+def sh_run(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded shell execution. Classifies the command and runs it only if allowed:
+    CRITICAL is hard-blocked; HIGH needs individual confirmation; MEDIUM auto-runs
+    only inside an approved plan (else confirm). shell=False, cwd pinned, bounded."""
+    data = input_data if isinstance(input_data, dict) else {"command": str(input_data)}
+    command = str(data.get("command") or data.get("cmd") or data.get("input") or "").strip()
+    if not command:
+        return {"status": "error", "marker": "EMPTY_COMMAND",
+                "message": "A 'command' is required for sh_run."}
+    return _run_shell(command)
+
+
+# ── SERVER path (Phase 5: LOCAL background dev servers) ───────────────────────
+# serve_start reuses the SAME classifier + confirm discipline as sh_run: CRITICAL
+# is hard-blocked; an allowlisted dev command is MEDIUM (auto only inside an
+# approved plan); anything else is HIGH (individual confirm). The launch itself is
+# a NON-waiting Popen, cwd pinned, shell=False (coding_agent.server). status/logs/
+# stop are LOW (inspecting/stopping is always safe) and never confirm.
+def serve_start(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarded start of a LOCAL long-lived dev server (background process)."""
+    data = input_data if isinstance(input_data, dict) else {"command": str(input_data)}
+    command = str(data.get("command") or data.get("cmd") or "").strip()
+    if not command:
+        return {"status": "error", "marker": "EMPTY_COMMAND",
+                "message": "A 'command' is required for serve_start."}
+    if _workspace is None:
+        return {"status": "error", "marker": "NO_WORKSPACE",
+                "message": "No workspace granted. Call grant_workspace(path) first."}
+
+    cls = shell.classify(command, workspace_root=_workspace.root)
+    if cls["critical"]:
+        hitl.audit.info("BLOCK CRITICAL serve_start `%s` (%s)", command, cls["reason"])
+        logger.info("[coding-agent-guardian] serve_start tier=CRITICAL decision=BLOCKED cmd=%r",
+                    command)
+        return {"status": "error", "marker": "CRITICAL_BLOCKED", "tier": "CRITICAL",
+                "command": command, "reason": cls["reason"],
+                "message": "This command is hard-blocked and is never run."}
+
+    proposal = hitl.ShellProposal(command=command, tier=cls["tier"], program=cls["program"],
+                                  reason=cls["reason"], label="serve_start",
+                                  warning="Starts a LOCAL long-lived server that runs until "
+                                          "you stop it (serve_stop).")
+    approved = hitl.confirm(proposal,
+                            fallback=lambda p: _guardian.request_permission("serve_start"))
+    logger.info("[coding-agent-guardian] serve_start tier=%s decision=%s cmd=%r",
+                cls["tier"], "APPROVE" if approved else "DENY", command)
+    if not approved:
+        return {"status": "error", "marker": "GUARDIAN_DENIED", "tier": cls["tier"],
+                "command": command, "reason": cls["reason"]}
+
+    return server.start(command, cls["argv"], cwd=_workspace.root, tier=cls["tier"])
+
+
+def serve_status(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """LOW: is the server alive? + health probe + recent log tail + detected URL."""
+    data = input_data if isinstance(input_data, dict) else {"id": str(input_data)}
+    sid = str(data.get("id") or data.get("server_id") or "").strip()
+    if not sid:
+        return {"status": "error", "marker": "MISSING_ID", "message": "A server 'id' is required."}
+    return server.status(sid)
+
+
+def serve_logs(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """LOW: captured stdout/stderr tail for a tracked server."""
+    data = input_data if isinstance(input_data, dict) else {"id": str(input_data)}
+    sid = str(data.get("id") or data.get("server_id") or "").strip()
+    if not sid:
+        return {"status": "error", "marker": "MISSING_ID", "message": "A server 'id' is required."}
+    tail = data.get("tail", data.get("tail_n", 50))
+    try:
+        tail = int(tail)
+    except (TypeError, ValueError):
+        tail = 50
+    return server.logs(sid, tail_n=tail)
+
+
+def serve_stop(input_data: Dict[str, Any]) -> Dict[str, Any]:
+    """LOW: graceful-then-forced stop of a tracked server (always allowed)."""
+    data = input_data if isinstance(input_data, dict) else {"id": str(input_data)}
+    sid = str(data.get("id") or data.get("server_id") or "").strip()
+    if not sid:
+        return {"status": "error", "marker": "MISSING_ID", "message": "A server 'id' is required."}
+    return server.stop(sid)
