@@ -54,9 +54,10 @@ WS_ROOT = os.path.join(os.getcwd(), "_smoke_ws")
 STEP_NUM_PREDICT = 512
 PLAN_NUM_PREDICT = 2048
 
-# Friendly aliases -> Ollama tags. "deepseek" is the project's configured coding
-# model; "qwen" is the A/B challenger.
-_ALIASES = {"deepseek": None, "qwen": "qwen2.5-coder:7b"}  # deepseek filled at runtime
+# Friendly aliases -> explicit Ollama tags (independent of the configured default
+# so both remain A/B-able even after the coding model changes).
+_ALIASES = {"qwen": "qwen2.5-coder:7b",
+            "deepseek": "deepseek-coder-v2:16b-lite-instruct-q4_K_M"}
 
 STAGES = [
     ("L1_plan_write", 8,
@@ -248,8 +249,8 @@ def _print_table(label, results):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--models", default="deepseek",
-                    help="comma list of aliases (deepseek,qwen) or raw Ollama tags")
+    ap.add_argument("--models", default="qwen",
+                    help="comma list of aliases (qwen,deepseek) or raw Ollama tags")
     ap.add_argument("--num-predict", type=int, default=STEP_NUM_PREDICT)
     ap.add_argument("--plan-num-predict", type=int, default=PLAN_NUM_PREDICT)
     args = ap.parse_args()
@@ -262,8 +263,7 @@ def main():
     os.makedirs(WS_ROOT, exist_ok=True)
 
     brain = Brain()
-    _ALIASES["deepseek"] = get_brain_model("coding")  # the configured coding model
-    print(f"brain.mode = {brain.mode}   default coding model = {_ALIASES['deepseek']}")
+    print(f"brain.mode = {brain.mode}   configured coding model = {get_brain_model('coding')}")
     if brain.mode != "local":
         print("ABORT: brain is not in 'local' mode (Ollama unavailable). No real run.")
         return

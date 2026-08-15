@@ -6,6 +6,7 @@ Main AI brain with Ollama model routing + coding engine integration.
 import os
 import re
 import json
+import logging
 import requests
 from dotenv import load_dotenv
 from core.memory import Memory
@@ -22,6 +23,13 @@ load_dotenv()
 # Ollama config
 OLLAMA_URL = Config.OLLAMA_URL
 OLLAMA_TIMEOUT = Config.OLLAMA_TIMEOUT
+
+logger = logging.getLogger("chhoti.brain")
+
+# How many EXTRA times to re-call the model when it returns an empty /
+# whitespace-only generation (an Ollama hiccup, not a real answer). The coding-
+# agent A/B saw qwen occasionally return '' and stall a whole stage.
+_EMPTY_RETRIES = int(os.getenv("CHHOTI_DON_EMPTY_RETRIES", "2"))
 
 
 class Brain:
@@ -323,17 +331,24 @@ Explain karo:
             if system_prompt:
                 payload["system"] = system_prompt
 
-            response = requests.post(
-                OLLAMA_URL,
-                json=payload,
-                timeout=OLLAMA_TIMEOUT
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("response", "").strip()
-            else:
-                return f"Ollama HTTP Error {response.status_code}: {response.text[:200]}"
+            # Retry-on-empty on the success path (transient empty generation),
+            # keeping the existing user-facing error strings for HTTP/connection
+            # failures.
+            for attempt in range(_EMPTY_RETRIES + 1):
+                response = requests.post(
+                    OLLAMA_URL,
+                    json=payload,
+                    timeout=OLLAMA_TIMEOUT
+                )
+                if response.status_code != 200:
+                    return f"Ollama HTTP Error {response.status_code}: {response.text[:200]}"
+                text = (response.json().get("response", "") or "").strip()
+                if text:
+                    return text
+                if attempt < _EMPTY_RETRIES:
+                    logger.info("[brain] local_think empty generation; retry %d/%d",
+                                attempt + 1, _EMPTY_RETRIES)
+            return ""
 
         except requests.exceptions.ConnectionError:
             return "❌ Ollama server nahi mila! Terminal mein 'ollama serve' run karo."
@@ -407,6 +422,36 @@ Explain karo:
     # ==================================================
     # FAST STRUCTURED THINK (browser agent loop — Phase 2)
     # ==================================================
+    # ==================================================
+    # LOCAL GENERATE (single call) + RETRY-ON-EMPTY
+    # ==================================================
+    def _local_generate(self, payload: dict) -> str:
+        """One Ollama /api/generate call. Returns the response text stripped, or
+        '' on a non-200 status or any exception. This is the single-call primitive
+        that the retry-on-empty loop drives (patched in tests to simulate empties)."""
+        try:
+            r = requests.post(OLLAMA_URL, json=payload, timeout=OLLAMA_TIMEOUT)
+            if r.status_code == 200:
+                return (r.json().get("response", "") or "").strip()
+            return ""
+        except Exception:
+            return ""
+
+    def _local_generate_retry(self, payload: dict, retries: int = None) -> str:
+        """Drive :meth:`_local_generate`, RE-CALLING on an empty/whitespace-only
+        generation up to ``retries`` extra times before giving up (returns '')."""
+        retries = _EMPTY_RETRIES if retries is None else retries
+        for attempt in range(retries + 1):
+            out = self._local_generate(payload)
+            if out.strip():
+                return out
+            if attempt < retries:
+                logger.info("[brain] empty generation; retry %d/%d (model=%s)",
+                            attempt + 1, retries, payload.get("model"))
+        logger.warning("[brain] gave up after %d empty generations (model=%s)",
+                       retries + 1, payload.get("model"))
+        return ""
+
     def think_fast(self, prompt: str, brain_type: str = "navigation",
                    num_predict: int = 256, temperature: float = None,
                    system_prompt: str = None) -> str:
@@ -442,13 +487,8 @@ Explain karo:
             }
             if system_prompt:
                 payload["system"] = system_prompt
-            try:
-                r = requests.post(OLLAMA_URL, json=payload, timeout=OLLAMA_TIMEOUT)
-                if r.status_code == 200:
-                    return (r.json().get("response", "") or "").strip()
-                return ""
-            except Exception:
-                return ""
+            # Retry-on-empty: an empty generation is an Ollama hiccup, not an answer.
+            return self._local_generate_retry(payload)
 
         # API (OpenAI) mode — single small completion, no memory writes.
         try:

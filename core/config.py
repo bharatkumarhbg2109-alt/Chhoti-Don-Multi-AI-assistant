@@ -25,8 +25,13 @@ class Config:
     # These MUST match the exact tags installed in Ollama (`ollama list`).
     # Main brain: chat, planning, reasoning, conversation, tool calling.
     MAIN_MODEL = os.getenv("CHHOTI_DON_MAIN_MODEL", "qwen3.5:latest")
-    # Coding: code generation, code review, debugging, refactoring.
-    CODING_MODEL = os.getenv("CHHOTI_DON_CODING_MODEL", "deepseek-coder-v2:16b-lite-instruct-q4_K_M")
+    # Coding: code generation, code review, debugging, refactoring, and the
+    # autonomous coding-agent loop. qwen2.5-coder:7b won the coding-agent A/B — it
+    # is the only model that emits `finish` and self-heals, and it fits 8GB VRAM
+    # fully (faster). deepseek-coder-v2:lite is kept as a documented fallback and
+    # is selectable at runtime via CHHOTI_DON_CODING_MODEL.
+    CODING_MODEL = os.getenv("CHHOTI_DON_CODING_MODEL", "qwen2.5-coder:7b")
+    CODING_MODEL_FALLBACK = "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
     # Vision: image understanding, screenshots, PDF image pages, UI analysis.
     # Uses the dedicated llava vision model (installed as `llava:latest`).
     # Override with CHHOTI_DON_VISION_MODEL if desired.
