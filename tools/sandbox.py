@@ -16,9 +16,6 @@ from typing import Dict, Any, Optional, List, Tuple
 
 # Constants
 MAX_EXECUTION_TIME = 30  # seconds
-MAX_OUTPUT_SIZE = 10000  # characters
-
-# ==================================================
 MAX_OUTPUT_SIZE = 50000    # chars
 MAX_MEMORY_MB = 50         # MB limit hint
 
