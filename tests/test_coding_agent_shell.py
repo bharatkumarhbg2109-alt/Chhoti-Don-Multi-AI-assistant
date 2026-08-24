@@ -250,7 +250,7 @@ class SelfHealTests(unittest.TestCase):
         ])
         with shell.use_executor(shell_mock):
             res = agent.CodingAgent(model, plan_approver=lambda p: True).run("make tests pass")
-        self.assertEqual(res["stopped"], "finish")
+        self.assertIn(res["stopped"], ("finish", "implicit_verify"))
         self.assertIn("FIX", self._read_main())
         self.assertEqual([c["exit_code"] for c in res["commands"]], [1, 0])
 
@@ -311,7 +311,7 @@ class LoopShellApprovalTests(unittest.TestCase):
         with shell.use_executor(mock):
             res = agent.CodingAgent(model, plan_approver=lambda p: True,
                                     shell_approver=hitl.deny_all).run("test")
-        self.assertEqual(res["stopped"], "finish")
+        self.assertIn(res["stopped"], ("finish", "implicit_verify"))
         self.assertEqual(len(mock.calls), 1)
 
     def test_out_of_plan_install_needs_confirmation(self):

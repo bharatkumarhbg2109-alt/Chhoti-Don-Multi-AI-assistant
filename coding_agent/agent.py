@@ -311,6 +311,34 @@ def _arg_label(args: Dict[str, Any]) -> str:
                or args.get("q") or "")[:80]
 
 
+# Verify-style commands: when these exit 0 the task is likely done.
+# Matches: python -m pytest, pytest, python -m unittest, unittest,
+# and any script whose name ends with "test" or "check".
+_VERIFY_PROGRAMS = {"pytest", "unittest"}
+
+def _is_verify_command(argv: List[str]) -> bool:
+    """True when argv is a verify-style command (pytest, unittest, test_*, etc.)."""
+    if not argv:
+        return False
+    prog = (argv[0] or "").lower().rstrip(".py")
+    # bare: pytest, pytest-3, unittest
+    if prog in _VERIFY_PROGRAMS or prog.startswith("pytest"):
+        return True
+    # python -m pytest / python -m unittest
+    if prog == "python" and "-m" in argv:
+        idx = argv.index("-m")
+        if idx + 1 < len(argv) and argv[idx + 1].lower() in _VERIFY_PROGRAMS:
+            return True
+    # Script name ends with test/check or starts with test_ (strip .py first)
+    name = (argv[-1] if argv else "").lower()
+    if name.endswith(".py"):
+        name = name[:-3]
+    if (name.endswith("test") or name.endswith("check") or name.endswith("tests")
+            or name.startswith("test_") or name.startswith("test-")):
+        return True
+    return False
+
+
 def _norm_cmd(command: str) -> str:
     """Normalize a command for plan-scope matching (collapse whitespace)."""
     return " ".join(str(command or "").split())
@@ -532,6 +560,9 @@ class CodingAgent:
         # EXACTLY ONE corrective model call, then it fires. Never an infinite loop.
         nudged: set = set()
         parse_retries = 0
+        # Implicit-finish tracking: which action was nudged and at which step.
+        _nudged_action_sig: Optional[str] = None
+        _nudged_step: Optional[int] = None
 
         for step in range(1, self.max_steps + 1):
             action = None
@@ -570,6 +601,8 @@ class CodingAgent:
                 cmd_attempts[ncmd] = cmd_attempts.get(ncmd, 0) + 1
                 if cmd_attempts[ncmd] > self.heal_budget:
                     if self._maybe_nudge(("cmd", ncmd), history, trace, step, nudged):
+                        _nudged_action_sig = ncmd
+                        _nudged_step = step
                         continue  # one corrective call before the break fires
                     trace.append({"step": step, "error": "heal_budget", "command": ncmd[:160]})
                     logger.info("[coding-agent] heal-budget break step=%d cmd=%r", step, ncmd)
@@ -581,14 +614,6 @@ class CodingAgent:
                 # also catches a repeated identical FIX (fs_edit_file) â€” attempt memory.
                 sig = f"{tool}:{json.dumps(args, sort_keys=True, default=str)}"
                 sig_counts[sig] = sig_counts.get(sig, 0) + 1
-                if sig_counts[sig] > self.max_repeat:
-                    if self._maybe_nudge(("sig", sig), history, trace, step, nudged):
-                        continue  # one corrective call before the break fires
-                    trace.append({"step": step, "error": "no_progress", "signature": sig[:160]})
-                    logger.info("[coding-agent] no-progress break step=%d tool=%s", step, tool)
-                    return self._result(task, f"Stopped: repeated the same action with no progress "
-                                        f"({tool} {_arg_label(args)}).", trace, step,
-                                        "no_progress", t0, plan, executed, commands)
 
             result = _dispatch(tool, args)
             marker = result.get("marker") if isinstance(result, dict) else None
@@ -605,10 +630,52 @@ class CodingAgent:
             if tool == "sh_run" and isinstance(result, dict):
                 commands.append({"command": result.get("command"),
                                  "exit_code": result.get("exit_code"), "gate": gate})
+                # TRIGGER A: implicit verify — sh_run of a verify command exits 0
+                # => task likely done; break without calling the model again.
+                if (gate == "ALLOW"
+                        and result.get("exit_code") == 0
+                        and _is_verify_command(args.get("command", args.get("cmd", "")).split())):
+                    trace.append({"step": step, "action": "implicit_verify",
+                                  "command": result.get("command", "")})
+                    logger.info("[coding-agent] TRIGGER implicit_verify step=%d cmd=%r",
+                                step, result.get("command", ""))
+                    return self._result(
+                        task, obs, trace, step, "implicit_verify",
+                        t0, plan, executed, commands)
             if tool == "deploy_run" and isinstance(result, dict) and result.get("status") == "success":
                 self._run_deploys.append({"platform": result.get("platform"),
                                           "prod": result.get("prod"), "url": result.get("url"),
                                           "ok": result.get("ok")})
+            # TRIGGER B: implicit repeat — after a nudge, if the model repeats the
+            # same successful action, it is stuck on finish-emission, not failing.
+            # Terminate cleanly rather than looping or breaking with no_progress.
+            if (_nudged_step is not None
+                    and step == _nudged_step + 1
+                    and gate == "ALLOW"
+                    and isinstance(result, dict)
+                    and result.get("status") == "success"
+                    and marker not in _DENY_MARKERS):
+                cur_sig = f"{tool}:{json.dumps(args, sort_keys=True, default=str)}"
+                if cur_sig == _nudged_action_sig:
+                    trace.append({"step": step, "action": "implicit_repeat"})
+                    logger.info("[coding-agent] TRIGGER implicit_repeat step=%d tool=%s",
+                                step, tool)
+                    return self._result(
+                        task, obs, trace, step, "implicit_repeat",
+                        t0, plan, executed, commands)
+            # Deferred no-progress break: only fire AFTER dispatch (so TRIGGER B
+            # can override it for successful repeats).  Only for non-sh_run tools.
+            if tool != "sh_run" and sig_counts.get(sig, 0) > self.max_repeat:
+                if self._maybe_nudge(("sig", sig), history, trace, step, nudged):
+                    _nudged_action_sig = sig
+                    _nudged_step = step
+                    # Do NOT break here - continue to dispatch + TRIGGER B check.
+                else:
+                    trace.append({"step": step, "error": "no_progress", "signature": sig[:160]})
+                    logger.info("[coding-agent] no-progress break step=%d tool=%s", step, tool)
+                    return self._result(task, f"Stopped: repeated the same action with no progress "
+                                        f"({tool} {_arg_label(args)}).", trace, step,
+                                        "no_progress", t0, plan, executed, commands)
             trace.append({"step": step, "action": tool, "args": args,
                           "gate": gate, "observation": obs[:300]})
 

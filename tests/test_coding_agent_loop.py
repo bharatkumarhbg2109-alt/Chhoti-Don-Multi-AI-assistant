@@ -280,5 +280,131 @@ class RegistryBuildTests(unittest.TestCase):
         self.assertEqual(out["result"]["marker"], "EMPTY_TASK")
 
 
+
+# -- Implicit-finish tests (Task 7) ------------------------------------------------
+class ImplicitFinishTests(LoopBase):
+    """TRIGGER A (implicit_verify) and TRIGGER B (implicit_repeat) tests."""
+
+    def test_verify_success_triggers_implicit_verify(self):
+        """(a) exit_code=0 on pytest -> implicit_verify fires, loop ends."""
+        model = ScriptedModel([
+            _plan(("sh_run", {"command": "pytest tests/"})),
+            _act("sh_run", command="pytest tests/"),
+            '{"finish":"should not reach"}',
+        ])
+        def mock_exec(argv, cwd, timeout, output_cap):
+            cmd = " ".join(argv)
+            if "pytest" in cmd:
+                return {"exit_code": 0, "stdout": "1 passed", "stderr": "", "timed_out": False,
+                        "command": "pytest tests/"}
+            return {"exit_code": 0, "stdout": "", "stderr": "", "timed_out": False}
+
+        with hitl.use_approver(hitl.approve_all):
+            from coding_agent.shell import use_executor
+            with use_executor(mock_exec):
+                res = agent.CodingAgent(model, plan_approver=lambda p: True,
+                                        shell_approver=hitl.approve_all).run("test")
+        self.assertEqual(res["stopped"], "implicit_verify")
+        # Model was NOT called again after the verify step (only plan + 1 action call)
+        self.assertEqual(len(model.calls), 2)
+
+    def test_verify_failure_continues_loop(self):
+        """(b) exit_code=1 on pytest -> loop continues (failure, not done)."""
+        model = ScriptedModel([
+            _plan(("sh_run", {"command": "pytest tests/"})),
+            _act("sh_run", command="pytest tests/"),
+            '{"finish":"gave up"}',
+        ])
+        def mock_exec(argv, cwd, timeout, output_cap):
+            cmd = " ".join(argv)
+            if "pytest" in cmd:
+                return {"exit_code": 1, "stdout": "1 failed", "stderr": "", "timed_out": False,
+                        "command": "pytest tests/"}
+            return {"exit_code": 0, "stdout": "", "stderr": "", "timed_out": False}
+
+        with hitl.use_approver(hitl.approve_all):
+            from coding_agent.shell import use_executor
+            with use_executor(mock_exec):
+                res = agent.CodingAgent(model, plan_approver=lambda p: True,
+                                        shell_approver=hitl.approve_all).run("test")
+        self.assertEqual(res["stopped"], "finish")
+        self.assertIn("gave up", res["summary"])
+
+    def test_pip_install_not_verify_style(self):
+        """(c) exit_code=0 on pip install -> loop continues (not verify-style)."""
+        model = ScriptedModel([
+            _plan(("sh_run", {"command": "pip install requests"})),
+            _act("sh_run", command="pip install requests"),
+            '{"finish":"installed"}',
+        ])
+        def mock_exec(argv, cwd, timeout, output_cap):
+            cmd = " ".join(argv)
+            if "pip" in cmd:
+                return {"exit_code": 0, "stdout": "installed", "stderr": "", "timed_out": False,
+                        "command": "pip install requests"}
+            return {"exit_code": 0, "stdout": "", "stderr": "", "timed_out": False}
+
+        with hitl.use_approver(hitl.approve_all):
+            from coding_agent.shell import use_executor
+            with use_executor(mock_exec):
+                res = agent.CodingAgent(model, plan_approver=lambda p: True,
+                                        shell_approver=hitl.approve_all).run("install")
+        self.assertEqual(res["stopped"], "finish")
+        self.assertEqual(len(model.calls), 3)  # plan + 2 actions
+
+    def test_post_nudge_same_action_success_triggers_implicit_repeat(self):
+        """(d) post-nudge same action success -> implicit_repeat fires."""
+        # Use fs_write_file (overwrites, always succeeds) not fs_create_file
+        # (which errors with FILE_EXISTS on repeat).
+        model = ScriptedModel([
+            _plan(("fs_write_file", {"path": "x.txt"})),
+            _act("fs_write_file", path="x.txt", content="A"),
+            _act("fs_write_file", path="x.txt", content="A"),  # repeat -> nudge
+            _act("fs_write_file", path="x.txt", content="A"),  # repeat again -> implicit_repeat
+        ])
+        res = agent.CodingAgent(model, plan_approver=lambda p: True,
+                                max_repeat=1).run("build")
+        self.assertEqual(res["stopped"], "implicit_repeat")
+
+    def test_post_nudge_same_action_error_fires_guard(self):
+        """(e) post-nudge same action error -> guard still fires (not implicit)."""
+        # Use fs_create_file: 2nd call fails with FILE_EXISTS (error, not success),
+        # so TRIGGER B does NOT fire. no_progress fires instead.
+        model = ScriptedModel([
+            _plan(("fs_create_file", {"path": "x.txt"})),
+            _act("fs_create_file", path="x.txt", content="A"),
+            _act("fs_create_file", path="x.txt", content="A"),  # repeat -> nudge (FILE_EXISTS)
+            _act("fs_create_file", path="x.txt", content="A"),  # repeat -> no_progress
+        ])
+        res = agent.CodingAgent(model, plan_approver=lambda p: True,
+                                max_repeat=1).run("delete")
+        self.assertEqual(res["stopped"], "no_progress")
+
+    def test_model_finish_still_works(self):
+        """(f) model emits finish normally -> model_finish path still works."""
+        model = ScriptedModel([
+            _plan(("fs_create_file", {"path": "hello.txt"})),
+            _act("fs_create_file", path="hello.txt", content="hi\n"),
+            '{"finish":"created hello.txt"}',
+        ])
+        res = agent.CodingAgent(model, plan_approver=lambda p: True).run("hello")
+        self.assertEqual(res["stopped"], "finish")
+        self.assertEqual(res["status"], "success")
+        self.assertIn("hello.txt", res["summary"])
+
+    def test_is_verify_command_function(self):
+        """_is_verify_command correctly identifies verify-style commands."""
+        self.assertTrue(agent._is_verify_command(["pytest", "tests/"]))
+        self.assertTrue(agent._is_verify_command(["pytest"]))
+        self.assertTrue(agent._is_verify_command(["python", "-m", "pytest", "tests/"]))
+        self.assertTrue(agent._is_verify_command(["python", "-m", "unittest", "discover"]))
+        self.assertTrue(agent._is_verify_command(["python", "test_foo.py"]))
+        self.assertTrue(agent._is_verify_command(["python", "run_check.py"]))
+        self.assertFalse(agent._is_verify_command(["pip", "install", "requests"]))
+        self.assertFalse(agent._is_verify_command(["node", "index.js"]))
+        self.assertFalse(agent._is_verify_command(["python", "-m", "pip", "install", "x"]))
+
+
+
 if __name__ == "__main__":
     unittest.main()
