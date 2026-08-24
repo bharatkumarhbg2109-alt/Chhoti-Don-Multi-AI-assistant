@@ -174,7 +174,7 @@ class ShRunGateTests(unittest.TestCase):
         self.assertEqual(res["exit_code"], 0)
         self.assertTrue(res["ok"])
         self.assertEqual(mock.calls[0]["cwd"], self.root)  # cwd pinned to workspace
-        self.assertEqual(mock.calls[0]["argv"][0], "pytest")  # argv list, shell=False
+        self.assertEqual(mock.calls[0]["argv"][:3], ["python", "-m", "pytest"])  # shim applied + argv list, shell=False
 
     def test_medium_denied_does_not_run(self):
         with hitl.use_approver(hitl.deny_all), shell.use_executor(_exploding_executor):
@@ -358,6 +358,70 @@ class LoopShellApprovalTests(unittest.TestCase):
         blocked = [t for t in res["trace"] if t.get("gate") == "DENY:CRITICAL_BLOCKED"]
         self.assertTrue(blocked)
 
+
+
+# -- python -m shim tests (Task 6) ------------------------------------------------
+class PythonMShimTests(unittest.TestCase):
+    """Verify the python -m shim rewrites bare pytest/pip/etc. for Windows."""
+
+    def _capture_executor(self, argv, cwd, timeout, output_cap):
+        """Capture the argv the executor actually receives."""
+        self._captured_argv = argv
+        return {"exit_code": 0, "stdout": "", "stderr": "", "timed_out": False}
+
+    def setUp(self):
+        self._captured_argv = None
+
+    def test_bare_pytest_shimmed(self):
+        """(a) bare 'pytest tests/' -> executor receives ['python','-m','pytest','tests/']"""
+        with shell.use_executor(self._capture_executor):
+            shell.run(["pytest", "tests/"], cwd=".", timeout=10, output_cap=4096)
+        self.assertEqual(self._captured_argv, ["python", "-m", "pytest", "tests/"])
+
+    def test_bare_pip_shimmed(self):
+        """(b) bare 'pip install X' -> executor receives ['python','-m','pip','install','X']"""
+        with shell.use_executor(self._capture_executor):
+            shell.run(["pip", "install", "requests"], cwd=".", timeout=30, output_cap=4096)
+        self.assertEqual(self._captured_argv, ["python", "-m", "pip", "install", "requests"])
+
+    def test_python_m_not_double_wrapped(self):
+        """(c) 'python -m pytest tests/' -> unchanged (no double-wrap)"""
+        with shell.use_executor(self._capture_executor):
+            shell.run(["python", "-m", "pytest", "tests/"], cwd=".", timeout=10, output_cap=4096)
+        self.assertEqual(self._captured_argv, ["python", "-m", "pytest", "tests/"])
+
+    def test_node_not_shimmed(self):
+        """(d) 'node index.js' -> unchanged (not in shim allowlist)"""
+        with shell.use_executor(self._capture_executor):
+            shell.run(["node", "index.js"], cwd=".", timeout=10, output_cap=4096)
+        self.assertEqual(self._captured_argv, ["node", "index.js"])
+
+    def test_rm_rf_critical_before_shim(self):
+        """(e) 'rm -rf /' -> CRITICAL_BLOCKED by classifier, shim never fires"""
+        cls = shell.classify("rm -rf /")
+        self.assertEqual(cls["tier"], "CRITICAL")
+        self.assertTrue(cls["critical"])
+        # Shim is irrelevant here -- the classifier blocks before run() is called.
+
+    def test_bare_unittest_shimmed(self):
+        """bare unittest -> python -m unittest"""
+        with shell.use_executor(self._capture_executor):
+            shell.run(["unittest", "discover"], cwd=".", timeout=10, output_cap=4096)
+        self.assertEqual(self._captured_argv, ["python", "-m", "unittest", "discover"])
+
+    def test_bare_coverage_shimmed(self):
+        """bare coverage -> python -m coverage"""
+        with shell.use_executor(self._capture_executor):
+            shell.run(["coverage", "run", "-m", "pytest"], cwd=".", timeout=10, output_cap=4096)
+        self.assertEqual(self._captured_argv, ["python", "-m", "coverage", "run", "-m", "pytest"])
+
+    def test_shim_classify_then_run(self):
+        """Full pipeline: classify then run -- shim applies to the argv from classify."""
+        cls = shell.classify("pytest tests/test_foo.py")
+        self.assertEqual(cls["tier"], "MEDIUM")
+        with shell.use_executor(self._capture_executor):
+            shell.run(cls["argv"], cwd=".", timeout=10, output_cap=4096)
+        self.assertEqual(self._captured_argv, ["python", "-m", "pytest", "tests/test_foo.py"])
 
 if __name__ == "__main__":
     unittest.main()

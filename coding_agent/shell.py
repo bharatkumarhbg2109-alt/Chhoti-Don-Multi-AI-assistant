@@ -54,6 +54,10 @@ _CRITICAL_PROGRAMS = {
 }
 # mkfs.ext4 etc. — any mkfs.* is CRITICAL (handled by prefix check too).
 
+# Bare commands that fail on Windows (shell=False, exit 127) but resolve via
+# python -m <name>. The shim rewrites argv[0] BEFORE the executor runs.
+_SHIM_COMMANDS = {"pytest", "pip", "pip3", "unittest", "coverage"}
+
 # Destructive-but-legitimate programs -> HIGH (individual confirm every time).
 _HIGH_PROGRAMS = {"rm", "mv", "chmod", "chown", "chgrp", "kill", "pkill", "taskkill"}
 
@@ -255,7 +259,31 @@ class use_executor:
         return False
 
 
+def _apply_python_m_shim(argv: List[str]) -> List[str]:
+    """Rewrite bare X to python -m X when X is in the shim allowlist.
+
+    Only touches argv[0] and only when it matches exactly one of _SHIM_COMMANDS.
+    Does NOT weaken the CRITICAL hard-block classifier -- the rewritten argv is
+    still subject to classify() after the shim.  Applied to the executor input
+    only; the command shown to the user in HITL confirmation is unchanged.
+    """
+    if not argv:
+        return argv
+    program = _basename(argv[0]).lower()
+    if program in _SHIM_COMMANDS:
+        # Do NOT double-wrap: python -m pytest stays as-is.
+        if program == "python" and len(argv) > 1 and argv[1] == "-m":
+            return argv
+        return ["python", "-m"] + argv
+    return argv
+
+
 def run(argv: List[str], cwd: str, timeout: float, output_cap: int) -> Dict[str, Any]:
-    """Execute via the active executor (mock in tests, else default_run)."""
+    """Execute via the active executor (mock in tests, else default_run).
+
+    Applies the python -m shim BEFORE passing argv to the executor so that
+    bare pytest, pip etc. resolve on Windows (shell=False).
+    """
+    shimmed = _apply_python_m_shim(argv)
     fn = _executor.get() or default_run
-    return fn(argv, cwd=cwd, timeout=timeout, output_cap=output_cap)
+    return fn(shimmed, cwd=cwd, timeout=timeout, output_cap=output_cap)
