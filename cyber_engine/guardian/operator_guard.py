@@ -3,6 +3,53 @@ EvolveX Guardian Layer
 Controls high-risk autonomous actions.
 """
 
+from __future__ import annotations
+
+import contextvars
+from typing import Callable, Optional
+
+# ---------------------------------------------------------------------------
+# Confirmation provider (ContextVar — fail-safe DENY when unset)
+# ---------------------------------------------------------------------------
+_approver: "contextvars.ContextVar[Optional[Callable[[str], bool]]]" =     contextvars.ContextVar("guardian_approver", default=None)
+
+
+class use_approver:
+    """Context manager to install an approval provider for the current context."""
+
+    def __init__(self, fn: Callable[[str], bool]):
+        self._fn = fn
+
+    def __enter__(self):
+        self._token = _approver.set(self._fn)
+        return self
+
+    def __exit__(self, *exc):
+        _approver.reset(self._token)
+        return False
+
+
+def approve_all(_action_name: str) -> bool:
+    """Test provider: approves everything."""
+    return True
+
+
+def deny_all(_action_name: str) -> bool:
+    """Test provider: denies everything."""
+    return False
+
+
+def request_approval(action_name: str) -> bool:
+    """Consult the context-local approver.  No provider -> DENY (fail-safe)."""
+    fn = _approver.get()
+    if fn is None:
+        return False          # fail-safe: deny when nothing is configured
+    try:
+        return bool(fn(action_name))
+    except Exception:
+        return False          # any provider error -> deny (fail-safe)
+
+
 class OperatorGuard:
     """Class Description"""
 
@@ -22,7 +69,7 @@ class OperatorGuard:
 
         # Read-only coding-agent filesystem actions. Like the "web_" read tools,
         # these are LOW risk and auto-allow (no confirmation). Kept as an explicit
-        # allowlist â€” NOT a broad "fs_" prefix â€” so state-changing actions stay OUT
+        # allowlist — NOT a broad "fs_" prefix — so state-changing actions stay OUT
         # of the low tier and must be granted a confirmation path of their own.
         self.readonly_fs_actions = {
             "fs_list_dir",
@@ -31,7 +78,7 @@ class OperatorGuard:
         }
 
         # State-changing coding-agent filesystem actions (Phase 2). These NEVER
-        # auto-allow â€” assess_action forces requires_confirmation=True so the
+        # auto-allow — assess_action forces requires_confirmation=True so the
         # guarded layer must obtain a human approval before committing.
         #   MEDIUM: create/overwrite/edit content, make a directory.
         #   HIGH  : delete a file (stronger warning in the confirm prompt).
@@ -48,16 +95,13 @@ class OperatorGuard:
     # -----------------------------------------
     # Check if action requires approval
     # -----------------------------------------
-        """Function Description"""
     def requires_approval(self, action_name):
         """Function Description"""
         return action_name in self.protected_actions
 
     # -----------------------------------------
     # Check if file is protected
-        """Function Description"""
     # -----------------------------------------
-        """Function Description"""
     def is_protected_file(self, file_path):
         """Function Description"""
         for protected in self.protected_files:
@@ -66,16 +110,15 @@ class OperatorGuard:
         return False
 
     # -----------------------------------------
-        """Function Description"""
     # Request permission from operator
-        """Function Description"""
     # -----------------------------------------
-        """Function Description"""
     def request_permission(self, action_name):
-        """Function Description"""
-        print(f"\n[Guardian] Action '{action_name}' requires approval.")
-        decision = input("Approve? (yes/no): ").strip().lower()
-        return decision == "yes"
+        """Consult the context-local approver (ContextVar).
+
+        No provider set -> DENY (fail-safe).
+        Never calls input() or any blocking I/O.
+        """
+        return request_approval(action_name)
 
     def assess_action(self, action_name, target=None):
         """Return a non-mutating Guardian assessment for a proposed action.
