@@ -45,12 +45,15 @@ class BrainClient:
     # ── HTTP backend (same entry point as the UI) ────────────────
     def _ask_http(self, text: str) -> str:
         import requests
-        resp = requests.post(
-            f"{self.cfg.brain_api_base}/api/chat",
-            json={"message": text, "tool": self.cfg.brain_tool,
-                  "conversation_id": None, "private": True, "persist_user": True},
-            timeout=self.cfg.brain_timeout,
-        )
+        try:
+            resp = requests.post(
+                f"{self.cfg.brain_api_base}/api/chat",
+                json={"message": text, "tool": self.cfg.brain_tool,
+                      "conversation_id": None, "private": True, "persist_user": True},
+                timeout=self.cfg.brain_timeout,
+            )
+        except Exception:
+            return ""  # fail-open: voice never raises
         try:
             data = resp.json()
         except Exception:
