@@ -39,6 +39,41 @@ _workspace: Optional[WorkspaceSandbox] = None
 
 
 # ── workspace granting ────────────────────────────────────────────────────────
+# -- Explicit tool tiers (authoritative; refactor-proof) --------------------------
+# These make the tier of each tool EXPLICIT so a refactor cannot accidentally
+# change the risk level.
+TOOL_TIERS = {
+    # Read-only fs (LOW)
+    "fs_list_dir": "LOW",
+    "fs_read_file": "LOW",
+    "fs_search": "LOW",
+    # Write fs (MEDIUM/HIGH)
+    "fs_write_file": "MEDIUM",
+    "fs_create_file": "MEDIUM",
+    "fs_edit_file": "MEDIUM",
+    "fs_make_dir": "MEDIUM",
+    "fs_delete_file": "HIGH",
+    # Shell
+    "sh_run": "MEDIUM",       # MEDIUM in plan / HIGH outside plan (dynamic)
+    # Server
+    "serve_start": "MEDIUM",  # MEDIUM in plan / HIGH outside plan (dynamic)
+    "serve_status": "LOW",
+    "serve_logs": "LOW",
+    "serve_stop": "LOW",
+    # Deploy
+    "deploy_check": "LOW",
+    "deploy_run": "ALWAYS_CONFIRM",
+}
+
+
+def resolve_tier(tool: str, in_plan: bool = False) -> str:
+    """Return the confirmation tier for a tool."""
+    base = TOOL_TIERS.get(tool, "HIGH")
+    if tool in ("sh_run", "serve_start") and not in_plan:
+        return "HIGH"
+    return base
+
+
 def grant_workspace(path: str) -> Dict[str, Any]:
     """Grant a folder as the coding agent's jail root.
 

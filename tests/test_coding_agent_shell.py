@@ -423,5 +423,76 @@ class PythonMShimTests(unittest.TestCase):
             shell.run(cls["argv"], cwd=".", timeout=10, output_cap=4096)
         self.assertEqual(self._captured_argv, ["python", "-m", "pytest", "tests/test_foo.py"])
 
+
+# -- Guardian explicit tiering tests (Task 8) ------------------------------------
+class GuardianTierTests(unittest.TestCase):
+    """Verify resolve_tier() returns correct tiers for each tool."""
+
+    def test_readonly_fs_is_low(self):
+        self.assertEqual(guarded.resolve_tier("fs_list_dir"), "LOW")
+        self.assertEqual(guarded.resolve_tier("fs_read_file"), "LOW")
+        self.assertEqual(guarded.resolve_tier("fs_search"), "LOW")
+
+    def test_write_fs_in_plan_is_medium(self):
+        for tool in ("fs_write_file", "fs_create_file", "fs_edit_file", "fs_make_dir"):
+            self.assertEqual(guarded.resolve_tier(tool, in_plan=True), "MEDIUM", tool)
+
+    def test_write_fs_outside_plan_is_still_medium(self):
+        """Write fs tools are always MEDIUM (session approver handles scope)."""
+        self.assertEqual(guarded.resolve_tier("fs_write_file", in_plan=False), "MEDIUM")
+
+    def test_delete_file_is_high(self):
+        self.assertEqual(guarded.resolve_tier("fs_delete_file"), "HIGH")
+
+    def test_sh_run_in_plan_is_medium(self):
+        self.assertEqual(guarded.resolve_tier("sh_run", in_plan=True), "MEDIUM")
+
+    def test_sh_run_outside_plan_is_high(self):
+        self.assertEqual(guarded.resolve_tier("sh_run", in_plan=False), "HIGH")
+
+    def test_serve_start_in_plan_is_medium(self):
+        self.assertEqual(guarded.resolve_tier("serve_start", in_plan=True), "MEDIUM")
+
+    def test_serve_start_outside_plan_is_high(self):
+        self.assertEqual(guarded.resolve_tier("serve_start", in_plan=False), "HIGH")
+
+    def test_serve_status_logs_stop_are_low(self):
+        for tool in ("serve_status", "serve_logs", "serve_stop"):
+            self.assertEqual(guarded.resolve_tier(tool), "LOW", tool)
+
+    def test_deploy_check_is_low(self):
+        self.assertEqual(guarded.resolve_tier("deploy_check"), "LOW")
+
+    def test_deploy_run_is_always_confirm(self):
+        """deploy_run NEVER auto-approves -- not even under approve_all."""
+        self.assertEqual(guarded.resolve_tier("deploy_run"), "ALWAYS_CONFIRM")
+        self.assertEqual(guarded.resolve_tier("deploy_run", in_plan=True), "ALWAYS_CONFIRM")
+
+    def test_deploy_run_not_approved_by_approve_all(self):
+        """approve_all CANNOT approve deploy_run -- it uses a separate channel."""
+        from coding_agent import hitl as coding_hitl
+        # deploy_run uses confirm_deploy, not confirm.  approve_all only satisfies
+        # the regular confirm path, not the deploy channel.
+        proposal = coding_hitl.DeployProposal(
+            platform="test", command="deploy", prod=False,
+            secrets_found=False, secret_findings=[],
+            warning="test deploy",
+        )
+        # approve_all is installed for regular confirm; deploy channel has no approver
+        # -> confirm_deploy falls back to deny
+        with coding_hitl.use_approver(coding_hitl.approve_all):
+            result = coding_hitl.confirm_deploy(proposal)
+        self.assertFalse(result)
+
+    def test_unknown_tool_defaults_to_high(self):
+        """Unknown tools default to HIGH (never silently MEDIUM)."""
+        self.assertEqual(guarded.resolve_tier("unknown_tool_xyz"), "HIGH")
+
+    def test_tool_tiers_dict_covers_all_agent_tools(self):
+        """Every tool in AGENT_TOOLS has an explicit tier declaration."""
+        from coding_agent.agent import AGENT_TOOLS
+        for tool in AGENT_TOOLS:
+            self.assertIn(tool, guarded.TOOL_TIERS, f"{tool} missing from TOOL_TIERS")
+
 if __name__ == "__main__":
     unittest.main()
