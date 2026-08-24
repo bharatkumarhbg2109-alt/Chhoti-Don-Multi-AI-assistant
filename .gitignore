@@ -41,3 +41,7 @@ logs/
 # ── OS / editor noise ────────────────────────────────────────
 .DS_Store
 Thumbs.db
+# -- Browser profile cache (cookies, IndexedDB, session data) --
+browser/.userdata/
+browser/.userdata/**
+**/.userdata/
