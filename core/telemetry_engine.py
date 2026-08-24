@@ -5,9 +5,39 @@ from collections import defaultdict
 class TelemetryEngine:
 
     def __init__(self):
-        ...
         self.rule_success = defaultdict(int)
         self.rule_failure = defaultdict(int)
+
+        # Core Counters
+        self.total_executions = 0
+        self.success_count = 0
+        self.error_count = 0
+        self.blocked_count = 0
+
+        # Timing
+        self.total_execution_time = 0.0
+        self.peak_execution_time = 0.0
+        self.min_execution_time = None
+
+        # Tool Usage
+        self.tool_usage = defaultdict(int)
+        self.tool_success = defaultdict(int)
+        self.tool_failure = defaultdict(int)
+
+        # Failure Pattern Memory
+        self.failure_streak = defaultdict(int)
+        self.error_type_frequency = defaultdict(int)
+        self.tool_health_score = defaultdict(lambda: 1.0)
+        self.last_error_code = None
+
+        # Trend & Pattern Tracking
+        self.consecutive_failures = 0
+        self.max_consecutive_failures = 0
+        self.execution_history = []
+
+        # Last Execution Snapshot
+        self.last_execution_status = None
+        self.last_execution_time = 0.0
 
     def get_dynamic_confidence(self, rule_name, base_confidence):
         success = self.rule_success[rule_name]
@@ -18,49 +48,6 @@ class TelemetryEngine:
         # clamp between safe bounds
 
         return max(0.60, min(0.99, dynamic))
-
-        # =================================================
-        # Core Counters
-        # =================================================
-        self.total_executions = 0
-        self.success_count = 0
-        self.error_count = 0
-        self.blocked_count = 0
-
-        # =================================================
-        # Timing
-        # =================================================
-        self.total_execution_time = 0.0
-        self.peak_execution_time = 0.0
-        self.min_execution_time = None
-
-        # =================================================
-        # Tool Usage
-        # =================================================
-        self.tool_usage = defaultdict(int)
-        self.tool_success = defaultdict(int)
-        self.tool_failure = defaultdict(int)
-
-        # =================================================
-        # Failure Pattern Memory
-        # =================================================
-        self.failure_streak = defaultdict(int)
-        self.error_type_frequency = defaultdict(int)
-        self.tool_health_score = defaultdict(lambda: 1.0)
-        self.last_error_code = None
-
-        # =================================================
-        # Trend & Pattern Tracking
-        # =================================================
-        self.consecutive_failures = 0
-        self.max_consecutive_failures = 0
-        self.execution_history = []
-
-        # =================================================
-        # Last Execution Snapshot
-        # =================================================
-        self.last_execution_status = None
-        self.last_execution_time = 0.0
 
     # =================================================
     # RECORD EXECUTION
