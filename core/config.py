@@ -15,10 +15,9 @@ except ImportError:
 class Config:
     """Central configuration class. Preserved + upgraded."""
 
-    # AI Models
-    MODEL_NAME = os.getenv("CHHOTI_DON_OPENAI_MODEL", "gpt-4o-mini")
-    # LOCAL_MODEL gates local vs. simulation mode and is shown in status.
-    # It must be an installed Ollama tag — kept in sync with MAIN_MODEL.
+    # AI Models — Chhoti Don is LOCAL-ONLY (no cloud LLM).
+    # LOCAL_MODEL gates local vs. offline ("simulation") mode and is shown in
+    # status. It must be an installed Ollama tag — kept in sync with MAIN_MODEL.
     LOCAL_MODEL = os.getenv("CHHOTI_DON_OLLAMA_MODEL", "qwen3.5:latest")
 
     # ── Local model routing (single source of truth) ──────────
@@ -26,22 +25,21 @@ class Config:
     # Main brain: chat, planning, reasoning, conversation, tool calling.
     MAIN_MODEL = os.getenv("CHHOTI_DON_MAIN_MODEL", "qwen3.5:latest")
     # Coding: code generation, code review, debugging, refactoring, and the
-    # autonomous coding-agent loop. qwen2.5-coder:7b won the coding-agent A/B — it
-    # is the only model that emits `finish` and self-heals, and it fits 8GB VRAM
-    # fully (faster). deepseek-coder-v2:lite is kept as a documented fallback and
-    # is selectable at runtime via CHHOTI_DON_CODING_MODEL.
-    CODING_MODEL = os.getenv("CHHOTI_DON_CODING_MODEL", "qwen2.5-coder:7b")
+    # autonomous coding-agent loop. deepseek-coder-v2:16b-lite-instruct-q4_K_M is
+    # the SOLE coding model — it emits `finish`, self-heals, and fits 8GB VRAM.
+    # Overridable at runtime via CHHOTI_DON_CODING_MODEL.
+    CODING_MODEL = os.getenv("CHHOTI_DON_CODING_MODEL", "deepseek-coder-v2:16b-lite-instruct-q4_K_M")
     CODING_MODEL_FALLBACK = "deepseek-coder-v2:16b-lite-instruct-q4_K_M"
     # Vision: image understanding, screenshots, PDF image pages, UI analysis.
     # Uses the dedicated llava vision model (installed as `llava:latest`).
     # Override with CHHOTI_DON_VISION_MODEL if desired.
     VISION_MODEL = os.getenv("CHHOTI_DON_VISION_MODEL", "llava:latest")
 
-    # API Keys
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-    # Modes
-    SIMULATION_MODE = False if OPENAI_API_KEY else True
+    # Modes — LOCAL-ONLY. There is no cloud API key and no cloud mode. The
+    # offline ("simulation") state is decided at RUNTIME by Brain probing Ollama,
+    # not configured here; this flag is kept False for a backward-compatible
+    # to_dict() export.
+    SIMULATION_MODE = False
     DEBUG_MODE = os.getenv("CHHOTI_DON_DEBUG", "false").lower() == "true"
 
     # Memory
@@ -76,7 +74,8 @@ class Config:
 
     @classmethod
     def is_api_mode(cls) -> bool:
-        return bool(cls.OPENAI_API_KEY)
+        # LOCAL-ONLY: the cloud LLM path was removed, so this is always False.
+        return False
 
     @classmethod
     def is_local_mode(cls) -> bool:
@@ -86,7 +85,7 @@ class Config:
     def to_dict(cls) -> dict:
         """Safe config export — no secrets."""
         return {
-            "model": cls.MODEL_NAME,
+            "model": cls.LOCAL_MODEL,
             "local_model": cls.LOCAL_MODEL,
             "simulation_mode": cls.SIMULATION_MODE,
             "debug_mode": cls.DEBUG_MODE,

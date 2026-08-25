@@ -18,8 +18,8 @@ Safety for a smoke run:
 
 Usage (from the repo root):
   python tools/smoke_coding_agent.py                      # deepseek (default)
-  python tools/smoke_coding_agent.py --models deepseek,qwen
-  python tools/smoke_coding_agent.py --models qwen2.5-coder:7b --plan-num-predict 2048
+  python tools/smoke_coding_agent.py --models deepseek
+  python tools/smoke_coding_agent.py --models deepseek-coder-v2:16b-lite-instruct-q4_K_M --plan-num-predict 2048
 """
 
 from __future__ import annotations
@@ -54,10 +54,9 @@ WS_ROOT = os.path.join(os.getcwd(), "_smoke_ws")
 STEP_NUM_PREDICT = 512
 PLAN_NUM_PREDICT = 2048
 
-# Friendly aliases -> explicit Ollama tags (independent of the configured default
-# so both remain A/B-able even after the coding model changes).
-_ALIASES = {"qwen": "qwen2.5-coder:7b",
-            "deepseek": "deepseek-coder-v2:16b-lite-instruct-q4_K_M"}
+# Friendly alias -> explicit Ollama tag. Raw Ollama tags are also accepted as-is
+# on the command line, so any installed model can still be A/B-tested at runtime.
+_ALIASES = {"deepseek": "deepseek-coder-v2:16b-lite-instruct-q4_K_M"}
 
 STAGES = [
     ("L1_plan_write", 8,
@@ -249,8 +248,8 @@ def _print_table(label, results):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--models", default="qwen",
-                    help="comma list of aliases (qwen,deepseek) or raw Ollama tags")
+    ap.add_argument("--models", default="deepseek",
+                    help="comma list of aliases (deepseek) or raw Ollama tags")
     ap.add_argument("--num-predict", type=int, default=STEP_NUM_PREDICT)
     ap.add_argument("--plan-num-predict", type=int, default=PLAN_NUM_PREDICT)
     args = ap.parse_args()

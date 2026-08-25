@@ -10,8 +10,8 @@ from typing import Dict, List, Optional, Optional
 from core.model_router import resolve_model
 
 # Model names come from the centralized router / config (no hardcoded names).
-_MAIN = resolve_model("default")   # qwen3:latest
-_CODE = resolve_model("coding")    # deepseek-coder-v2:lite
+_MAIN = resolve_model("default")   # qwen3.5:latest
+_CODE = resolve_model("coding")    # deepseek-coder-v2:16b-lite-instruct-q4_K_M
 _VISION = resolve_model("vision")  # llava:latest
 
 WEB_TOOL_INSTRUCTIONS = (
@@ -170,10 +170,9 @@ BRAINS: Dict[str, Dict] = {
     # Dedicated, fast, token-cheap brain for the READ-ONLY browser agent loop
     # (Phase 2). Structured JSON action selection ONLY — never user-facing prose,
     # so it deliberately does NOT get the Hinglish / web-tool suffixes (see
-    # get_system_prompt). Reuses the main model (qwen2.5:7b-instruct is not
-    # installed); the loop calls it with think:false + a low num_predict so many
-    # steps stay fast and cheap on the 8GB GPU. Override the tag with
-    # CHHOTI_DON_NAV_MODEL.
+    # get_system_prompt). Reuses the main model (qwen3.5:latest); the loop calls
+    # it with think:false + a low num_predict so many steps stay fast and cheap
+    # on the 8GB GPU. Override the tag with CHHOTI_DON_NAV_MODEL.
     "navigation": {
         "model": os.environ.get("CHHOTI_DON_NAV_MODEL", _MAIN),
         "temperature": 0.1,

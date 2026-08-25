@@ -85,22 +85,20 @@ def _current_provider_model(force_refresh: bool = False):
 
     try:
         from core.config import Config
-        configured_model = Config.MODEL_NAME if startup_mode == "api" else Config.LOCAL_MODEL
+        configured_model = Config.LOCAL_MODEL
     except Exception:
         configured_model = "qwen3.5:latest"
 
-    provider = "openai" if startup_mode == "api" else "ollama"
+    # LOCAL-ONLY: the sole provider is Ollama (no cloud LLM path).
+    provider = "ollama"
 
     def _model_present(name, available):
         base = name.split(":")[0]
         return any(m == name or m.split(":")[0] == base for m in available)
 
-    if startup_mode == "api":
-        model_available = True
-    else:
-        model_available = _model_present(configured_model, models)
+    model_available = _model_present(configured_model, models)
 
-    live = startup_mode == "api" or (ollama_online and model_available)
+    live = ollama_online and model_available
     result = (provider, configured_model, startup_mode, live, ollama_online, models, model_available)
     _PROVIDER_CACHE["value"] = result
     _PROVIDER_CACHE["ts"] = now
@@ -542,8 +540,8 @@ def status():
     """
     Extended status so the frontend can distinguish:
       - backend online (this endpoint responding)
-      - real AI provider online   (mode api/local + model reachable)
-      - simulated fallback active (mode == simulation)
+      - real AI provider online   (local mode + model reachable)
+      - offline fallback active   (mode == simulation)
       - configured model unavailable (local mode, model not pulled)
 
     Backward compatible: the original `ollama` and `models` fields are preserved.
@@ -551,10 +549,7 @@ def status():
     provider, configured_model, startup_mode, live, ollama_online, models, model_available = \
         _current_provider_model(force_refresh=True)
 
-    if startup_mode == "api":
-        mode = "live"
-        provider_online = True
-    elif ollama_online and model_available:
+    if ollama_online and model_available:
         mode = "live"
         provider_online = True
     else:
@@ -573,10 +568,10 @@ def status():
         "backend":         "online",
         "backend_online":  True,
         "mode":            mode,               # live | simulation
-        "runtime_mode":    startup_mode,       # api | local | simulation
+        "runtime_mode":    startup_mode,       # local | simulation
         "provider":        provider,
         "provider_online": provider_online,
-        "model":           configured_model,   # e.g. qwen3.5:latest / gpt-4o-mini
+        "model":           configured_model,   # e.g. qwen3.5:latest
         "model_available": model_available,
         "simulated":       simulated,
         "ai_online":       ai_online,
