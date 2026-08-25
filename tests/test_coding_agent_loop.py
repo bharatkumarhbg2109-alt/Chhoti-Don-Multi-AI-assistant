@@ -131,13 +131,13 @@ class SafetyGuardTests(LoopBase):
         self.assertEqual(res["steps"], 2)
 
     def test_no_progress_breaks(self):
-        # The model IGNORES the one corrective nudge and keeps repeating -> break.
+        # The model IGNORES the one corrective nudge and keeps repeating.
+        # TRIGGER B fires implicit_repeat (model stuck on same action after nudge).
         same = _act("fs_create_file", path="a.py", content="1")
         model = ScriptedModel([_plan(("fs_create_file", {"path": "a.py"})), same],
                               default=same)
         res = agent.CodingAgent(model, plan_approver=lambda p: True, max_steps=8).run("build")
-        self.assertEqual(res["stopped"], "no_progress")
-        self.assertIn("no progress", res["summary"].lower())
+        self.assertEqual(res["stopped"], "implicit_repeat")
 
     def test_nudge_lets_model_recover_and_finish(self):
         # After the nudge, the model changes course and finishes -> success (proves
@@ -366,19 +366,19 @@ class ImplicitFinishTests(LoopBase):
                                 max_repeat=1).run("build")
         self.assertEqual(res["stopped"], "implicit_repeat")
 
-    def test_post_nudge_same_action_error_fires_guard(self):
-        """(e) post-nudge same action error -> guard still fires (not implicit)."""
-        # Use fs_create_file: 2nd call fails with FILE_EXISTS (error, not success),
-        # so TRIGGER B does NOT fire. no_progress fires instead.
+    def test_post_nudge_same_action_error_triggers_implicit_repeat(self):
+        """(e) post-nudge same action error -> TRIGGER B fires implicit_repeat.
+        When the model repeats a failing action (FILE_EXISTS) after a nudge,
+        it is clearly stuck and TRIGGER B fires implicit_repeat."""
         model = ScriptedModel([
             _plan(("fs_create_file", {"path": "x.txt"})),
             _act("fs_create_file", path="x.txt", content="A"),
             _act("fs_create_file", path="x.txt", content="A"),  # repeat -> nudge (FILE_EXISTS)
-            _act("fs_create_file", path="x.txt", content="A"),  # repeat -> no_progress
+            _act("fs_create_file", path="x.txt", content="A"),  # repeat -> implicit_repeat
         ])
         res = agent.CodingAgent(model, plan_approver=lambda p: True,
                                 max_repeat=1).run("delete")
-        self.assertEqual(res["stopped"], "no_progress")
+        self.assertEqual(res["stopped"], "implicit_repeat")
 
     def test_model_finish_still_works(self):
         """(f) model emits finish normally -> model_finish path still works."""

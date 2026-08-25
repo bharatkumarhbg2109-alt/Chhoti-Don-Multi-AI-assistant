@@ -647,13 +647,12 @@ class CodingAgent:
                                           "prod": result.get("prod"), "url": result.get("url"),
                                           "ok": result.get("ok")})
             # TRIGGER B: implicit repeat — after a nudge, if the model repeats the
-            # same successful action, it is stuck on finish-emission, not failing.
+            # same action (success or failure), it is stuck. Fire implicit_repeat to stop cleanly.
             # Terminate cleanly rather than looping or breaking with no_progress.
             if (_nudged_step is not None
-                    and step == _nudged_step + 1
+                    and step > _nudged_step
                     and gate == "ALLOW"
                     and isinstance(result, dict)
-                    and result.get("status") == "success"
                     and marker not in _DENY_MARKERS):
                 cur_sig = f"{tool}:{json.dumps(args, sort_keys=True, default=str)}"
                 if cur_sig == _nudged_action_sig:

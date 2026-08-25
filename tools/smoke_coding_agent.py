@@ -52,7 +52,7 @@ WS_ROOT = os.path.join(os.getcwd(), "_smoke_ws")
 # Default per-phase token budgets. The PLAN phase needs more room so a content-
 # heavy plan array does not truncate mid-JSON (the L3 plan_parse_error).
 STEP_NUM_PREDICT = 512
-PLAN_NUM_PREDICT = 2048
+PLAN_NUM_PREDICT = 4096
 
 # Friendly alias -> explicit Ollama tag. Raw Ollama tags are also accepted as-is
 # on the command line, so any installed model can still be A/B-tested at runtime.

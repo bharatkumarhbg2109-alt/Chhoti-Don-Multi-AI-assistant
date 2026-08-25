@@ -285,7 +285,7 @@ class SelfHealTests(unittest.TestCase):
         with shell.use_executor(shell_mock):
             res = agent.CodingAgent(model, plan_approver=lambda p: True,
                                     heal_budget=5, max_steps=12).run("heal")
-        self.assertEqual(res["stopped"], "no_progress")
+        self.assertEqual(res["stopped"], "implicit_repeat")
 
 
 class LoopShellApprovalTests(unittest.TestCase):
