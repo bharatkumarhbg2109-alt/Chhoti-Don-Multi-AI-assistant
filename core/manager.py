@@ -513,6 +513,55 @@ class ManagerAgent:
         except Exception:
             pass  # fail-open: never let the browser layer break ordinary chat
 
+        # ── Hands Layer (fast path) ────────────────────────────────────
+        # Route simple, unambiguous OS-level intents (weather, time, news,
+        # search, filesystem, terminal, etc.) through the modular Hands Layer
+        # BEFORE the LLM-based brain.decide_tool(). This avoids a model
+        # round-trip for deterministic queries. Fail-open: any exception
+        # falls through to the existing brain pipeline.
+        try:
+            from hands.intent_router import route_intent
+            from hands.tool_manager import get_tool_manager
+
+            hand_result = route_intent(task)
+            if hand_result and hand_result.get("matched"):
+                hand_name = hand_result["hand"]
+                action = hand_result["action"]
+                params = hand_result.get("params", {})
+                tm = get_tool_manager()
+
+                # LOW-tier hands (weather, time, news, search) execute
+                # directly — no guardian needed for read-only OS ops.
+                # HIGH-tier hands (filesystem, terminal, windows, input)
+                # route through the existing OperatorGuard via safe_tool_execute.
+                HIGH_TIER_HANDS = {
+                    "filesystem", "terminal", "windows", "input",
+                }
+
+                if hand_name in HIGH_TIER_HANDS:
+                    result = self.safe_tool_execute(
+                        f"hands_{hand_name}_{action}",
+                        lambda: tm.execute(hand_name, action, params),
+                        user_lang,
+                    )
+                else:
+                    result = tm.execute(hand_name, action, params)
+
+                if result and result.get("status") == "success":
+                    response_text = result.get("result", str(result))
+                    # Update conversation memory for context continuity.
+                    self.memory.add("user", task)
+                    self.memory.add("assistant", str(response_text)[:2000])
+                    return {
+                        "response": response_text,
+                        "source": "hands",
+                        "hand": hand_name,
+                        "action": action,
+                    }
+        except Exception:
+            # Fail-open: any Hands Layer error falls through to brain.
+            pass
+
         try:
             tool_name = self.brain.decide_tool(task)
         except Exception:
