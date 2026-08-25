@@ -1,6 +1,6 @@
 # 🧠 Chhoti Don — Brain.md
 
-> Living codebase memory. Last updated: 2026-08-25. Branch: `desktop-integration`. HEAD: `714da55`.
+> Living codebase memory. Last updated: 2026-08-25. Branch: `desktop-integration`. HEAD: `bf5ccba`.
 > Update this file every time a feature is added, changed, or removed.
 
 ---
@@ -265,6 +265,9 @@
     #2  browser.guarded._gate()    — before every browser operation (action level)
     #3  OperatorGuard              — before tool execution in _process_tool_pipeline
     #4  HITL confirm()             — before state-changing browser actions (Phase 3)
+    #5  coding_agent/guarded._gate()   — before every coding tool (fs/shell/deploy)
+    #6  coding_agent/hitl.confirm()    — before MEDIUM/HIGH coding actions
+    #7  coding_agent/deploy_run        — separate approver channel, always individual
 ```
 
 ---
@@ -292,6 +295,10 @@
    - Default: `detect_intent()` + `detect_task()` → coding task or `brain_task()`
 6. **brain_task()** → `ManagerAgent.brain_task()`:
    a. Check browser triggers: `is_shopping_request()` → `shopping_task()`, `is_browser_research_request()` → `research_task()`
+   b. Hands Layer: route_intent(message) -> if hands match:
+      - LOW-tier (weather/time/news/search): ToolManager.execute() -> return
+      - HIGH-tier (filesystem/terminal): safe_tool_execute() -> return
+      - Fail-open: any exception -> fall through to brain pipeline
    b. `brain.decide_tool()` → rule-based tool detection (calculator, code tools, web search, open_page)
    c. If tool detected → `safe_tool_execute()` (through Guardian gate)
    d. RAG: `_should_run_rag()` → `retrieve_context()` → `build_grounded_system()` (injects top-3 chunks < 0.45 distance)
