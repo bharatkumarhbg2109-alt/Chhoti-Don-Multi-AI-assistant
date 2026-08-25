@@ -6,6 +6,7 @@ Main AI brain with Ollama model routing + coding engine integration.
 import os
 import re
 import json
+import logging
 import requests
 from dotenv import load_dotenv
 from core.memory import Memory
@@ -23,6 +24,13 @@ load_dotenv()
 OLLAMA_URL = Config.OLLAMA_URL
 OLLAMA_TIMEOUT = Config.OLLAMA_TIMEOUT
 
+logger = logging.getLogger("chhoti.brain")
+
+# How many EXTRA times to re-call the model when it returns an empty /
+# whitespace-only generation (an Ollama hiccup, not a real answer). The coding-
+# agent A/B saw qwen occasionally return '' and stall a whole stage.
+_EMPTY_RETRIES = int(os.getenv("CHHOTI_DON_EMPTY_RETRIES", "2"))
+
 
 class Brain:
 
@@ -31,34 +39,26 @@ class Brain:
     # ==================================================
     def __init__(self):
         self.memory = Memory()
-        self.api_key = os.getenv("OPENAI_API_KEY")
         self._current_brain_type = "default"
 
-        # Mode Priority:
-        # 1. OpenAI API
-        # 2. Local Ollama
-        # 3. Simulation
-
-        if self.api_key:
-            try:
-                from openai import OpenAI
-                self.client = OpenAI(api_key=self.api_key)
-                self.mode = "api"
-            except ImportError:
-                self.mode = "local"
-        else:
-            try:
-                response = requests.get(f"{Config.OLLAMA_HOST}/api/tags", timeout=3)
-                response.raise_for_status()
-                names = [item.get("name", "") for item in response.json().get("models", [])]
-                required_base = Config.LOCAL_MODEL.split(":")[0]
-                available = any(
-                    name == Config.LOCAL_MODEL or name.split(":")[0] == required_base
-                    for name in names
-                )
-                self.mode = "local" if available else "simulation"
-            except Exception:
-                self.mode = "simulation"
+        # Chhoti Don is LOCAL-ONLY. The sole brain is the local Ollama stack
+        # (qwen3.5 chat/reasoning + deepseek-coder for code). There is NO cloud
+        # path. mode == "local" when the configured model is reachable, else
+        # "simulation" — a clearly-flagged OFFLINE state that returns a plain
+        # "local model unavailable" error, never a cloud call or fabricated answer
+        # (see simulated_response).
+        try:
+            response = requests.get(f"{Config.OLLAMA_HOST}/api/tags", timeout=3)
+            response.raise_for_status()
+            names = [item.get("name", "") for item in response.json().get("models", [])]
+            required_base = Config.LOCAL_MODEL.split(":")[0]
+            available = any(
+                name == Config.LOCAL_MODEL or name.split(":")[0] == required_base
+                for name in names
+            )
+            self.mode = "local" if available else "simulation"
+        except Exception:
+            self.mode = "simulation"
 
     # ==================================================
     # MAIN THINK FUNCTION
@@ -105,29 +105,11 @@ class Brain:
             self.memory.add("assistant", reply)
             return reply
 
-        # API Mode (OpenAI)
-        try:
-            messages = self.memory.get_context()
-
-            # System prompt inject karo
-            if system_prompt:
-                messages = [{"role": "system", "content": system_prompt}] + [
-                    m for m in messages if m.get("role") != "system"
-                ]
-
-            from openai import OpenAI
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                temperature=temperature
-            )
-
-            reply = response.choices[0].message.content
-            self.memory.add("assistant", reply)
-            return reply
-
-        except Exception as e:
-            return f"Brain Error: {str(e)}"
+        # LOCAL-ONLY: no cloud path exists. Reaching here means the local model
+        # is unavailable -> return the clear offline notice (never a cloud call).
+        reply = self.simulated_response(prompt)
+        self.memory.add("assistant", reply)
+        return reply
 
     # ==================================================
     # STREAMING THINK (token-by-token)
@@ -137,8 +119,8 @@ class Brain:
         Streaming counterpart of think(): a generator that yields response text
         fragments as the model produces them. Behaviour, model, params, system
         prompt and MEMORY updates are identical to think() — only delivery is
-        chunked. Only local (Ollama) mode truly token-streams; simulation and
-        api modes yield the full reply once (local is the target of this path).
+        chunked. Only local (Ollama) mode truly token-streams; the offline
+        (simulation) path yields its notice once (local is the target here).
         """
         self.memory.add("user", prompt)
 
@@ -166,22 +148,9 @@ class Brain:
             yield reply
             return
 
-        # API Mode (OpenAI) — single yield; keeps memory consistent with think().
-        try:
-            messages = self.memory.get_context()
-            if system_prompt:
-                messages = [{"role": "system", "content": system_prompt}] + [
-                    m for m in messages if m.get("role") != "system"
-                ]
-            from openai import OpenAI
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                temperature=temperature,
-            )
-            reply = response.choices[0].message.content
-        except Exception as e:
-            reply = f"Brain Error: {str(e)}"
+        # LOCAL-ONLY: no cloud path. Reaching here means the local model is
+        # unavailable -> yield the clear offline notice (never a cloud call).
+        reply = self.simulated_response(prompt)
         self.memory.add("assistant", reply)
         yield reply
 
@@ -323,17 +292,24 @@ Explain karo:
             if system_prompt:
                 payload["system"] = system_prompt
 
-            response = requests.post(
-                OLLAMA_URL,
-                json=payload,
-                timeout=OLLAMA_TIMEOUT
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("response", "").strip()
-            else:
-                return f"Ollama HTTP Error {response.status_code}: {response.text[:200]}"
+            # Retry-on-empty on the success path (transient empty generation),
+            # keeping the existing user-facing error strings for HTTP/connection
+            # failures.
+            for attempt in range(_EMPTY_RETRIES + 1):
+                response = requests.post(
+                    OLLAMA_URL,
+                    json=payload,
+                    timeout=OLLAMA_TIMEOUT
+                )
+                if response.status_code != 200:
+                    return f"Ollama HTTP Error {response.status_code}: {response.text[:200]}"
+                text = (response.json().get("response", "") or "").strip()
+                if text:
+                    return text
+                if attempt < _EMPTY_RETRIES:
+                    logger.info("[brain] local_think empty generation; retry %d/%d",
+                                attempt + 1, _EMPTY_RETRIES)
+            return ""
 
         except requests.exceptions.ConnectionError:
             return "❌ Ollama server nahi mila! Terminal mein 'ollama serve' run karo."
@@ -407,6 +383,36 @@ Explain karo:
     # ==================================================
     # FAST STRUCTURED THINK (browser agent loop — Phase 2)
     # ==================================================
+    # ==================================================
+    # LOCAL GENERATE (single call) + RETRY-ON-EMPTY
+    # ==================================================
+    def _local_generate(self, payload: dict) -> str:
+        """One Ollama /api/generate call. Returns the response text stripped, or
+        '' on a non-200 status or any exception. This is the single-call primitive
+        that the retry-on-empty loop drives (patched in tests to simulate empties)."""
+        try:
+            r = requests.post(OLLAMA_URL, json=payload, timeout=OLLAMA_TIMEOUT)
+            if r.status_code == 200:
+                return (r.json().get("response", "") or "").strip()
+            return ""
+        except Exception:
+            return ""
+
+    def _local_generate_retry(self, payload: dict, retries: int = None) -> str:
+        """Drive :meth:`_local_generate`, RE-CALLING on an empty/whitespace-only
+        generation up to ``retries`` extra times before giving up (returns '')."""
+        retries = _EMPTY_RETRIES if retries is None else retries
+        for attempt in range(retries + 1):
+            out = self._local_generate(payload)
+            if out.strip():
+                return out
+            if attempt < retries:
+                logger.info("[brain] empty generation; retry %d/%d (model=%s)",
+                            attempt + 1, retries, payload.get("model"))
+        logger.warning("[brain] gave up after %d empty generations (model=%s)",
+                       retries + 1, payload.get("model"))
+        return ""
+
     def think_fast(self, prompt: str, brain_type: str = "navigation",
                    num_predict: int = 256, temperature: float = None,
                    system_prompt: str = None) -> str:
@@ -442,28 +448,12 @@ Explain karo:
             }
             if system_prompt:
                 payload["system"] = system_prompt
-            try:
-                r = requests.post(OLLAMA_URL, json=payload, timeout=OLLAMA_TIMEOUT)
-                if r.status_code == 200:
-                    return (r.json().get("response", "") or "").strip()
-                return ""
-            except Exception:
-                return ""
+            # Retry-on-empty: an empty generation is an Ollama hiccup, not an answer.
+            return self._local_generate_retry(payload)
 
-        # API (OpenAI) mode — single small completion, no memory writes.
-        try:
-            from openai import OpenAI
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini", messages=messages, temperature=temperature,
-                max_tokens=num_predict,
-            )
-            return (response.choices[0].message.content or "").strip()
-        except Exception:
-            return ""
+        # LOCAL-ONLY: no cloud path. If the local model is unavailable we return
+        # the clear offline notice rather than a fabricated answer.
+        return self.simulated_response(prompt)
 
     # ==================================================
     # SET ACTIVE BRAIN TYPE
@@ -516,14 +506,8 @@ JSON FORMAT:
         try:
             if self.mode == "local":
                 raw = self.local_think(planning_prompt, model=get_brain_model("default"))
-            elif self.mode == "api":
-                from openai import OpenAI
-                response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": planning_prompt}]
-                )
-                raw = response.choices[0].message.content
             else:
+                # LOCAL-ONLY: local model unavailable -> no plan (no cloud fallback).
                 return None
 
             print("RAW PLANNER OUTPUT:\n", raw)
@@ -633,14 +617,8 @@ If incorrect return corrected improved version only.
         try:
             if self.mode == "local":
                 review = self.local_think(review_prompt)
-            elif self.mode == "api":
-                from openai import OpenAI
-                response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": review_prompt}]
-                )
-                review = response.choices[0].message.content
             else:
+                # LOCAL-ONLY: local model unavailable -> skip review (no cloud fallback).
                 return "APPROVED"
 
             return review.strip()
@@ -678,7 +656,14 @@ If incorrect return corrected improved version only.
     # SIMULATION MODE
     # ==================================================
     def simulated_response(self, prompt):
+        """Clear LOCAL-ONLY offline notice — NOT a fabricated answer.
+
+        Chhoti Don has no cloud/simulated brain. This string is returned only
+        when the local Ollama model is unreachable, so callers surface a plain
+        "local model unavailable" error instead of pretending to have answered.
+        """
         return (
-            "[Simulated Brain Response]\n"
-            f"Processed task: {prompt}"
+            "❌ Local model unavailable — Chhoti Don is local-only (no cloud). "
+            "Start Ollama with 'ollama serve' and make sure the model is installed "
+            f"(configured: {Config.LOCAL_MODEL})."
         )

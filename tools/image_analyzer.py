@@ -1,8 +1,8 @@
 """Chhoti Don - Local Vision Tool (image understanding via Ollama).
 
 Zero-cost, no API keys: sends an image + prompt to a local vision-capable Ollama
-model (default Config.VISION_MODEL = qwen3.5:latest, which has native vision) and
-returns a text description. Accepts a local file path or a raw base64 string —
+model (default Config.VISION_MODEL = llava:latest) and returns a text
+description. Accepts a local file path or a raw base64 string —
 never fetches remote URLs (stays offline; avoids SSRF).
 
 Returns a status dict with clear markers instead of raising, so callers/LLMs can

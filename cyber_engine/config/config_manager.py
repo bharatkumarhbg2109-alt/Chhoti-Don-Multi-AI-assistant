@@ -142,7 +142,6 @@ DEFAULT_CONFIG = {
     # 🔑 API Keys (never store actual keys here)
     # --------------------------------------------------
     "api": {
-        "openai_key_env": "OPENAI_API_KEY",
         "shodan_key_env": "SHODAN_API_KEY",
         "virustotal_key_env": "VT_API_KEY",
     },

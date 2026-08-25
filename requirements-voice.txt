@@ -7,6 +7,7 @@
 #    If CUDA init fails, voice/stt.py auto-falls back to CPU (int8).
 #  - webrtcvad has no 3.13 wheel; webrtcvad-wheels provides one.
 
+numpy>=1.24  # array ops for audio capture + STT
 faster-whisper>=1.1        # STT (CTranslate2 Whisper; GPU or CPU)
 piper-tts>=1.6             # TTS (OHF-Voice/piper1-gpl, CPU; bundles espeak-ng-data)
 sounddevice>=0.5           # mic capture + speaker playback (PortAudio)
