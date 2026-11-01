@@ -37,7 +37,8 @@ class Brain:
     # ==================================================
     # INIT
     # ==================================================
-    def __init__(self):
+    def __init__(self, config=None):
+        self.config = config
         self.memory = Memory()
         self._current_brain_type = "default"
 

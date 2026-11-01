@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Icon from './Icon';
+import { useMode } from '../context/ModeContext';
 
 const primaryNav = [
   { view: 'assistant', icon: 'chat', label: 'Assistant' },
+  { view: 'code', icon: 'code', label: 'Code' },
   { view: 'workspace', icon: 'grid', label: 'Workspace' },
   { view: 'memory', icon: 'brain', label: 'Memory' },
 ];
@@ -39,6 +41,7 @@ export default function Sidebar({
   onRenameConversation,
   onDeleteConversation,
 }) {
+  const { isCodeMode } = useMode();
   const [search, setSearch] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -67,7 +70,7 @@ export default function Sidebar({
   };
 
   const navButton = (item) => {
-    const active = currentView === item.view;
+    const active = currentView === item.view || (item.view === 'code' && isCodeMode && currentView === 'workspace');
     return (
       <button
         type="button"
@@ -82,7 +85,14 @@ export default function Sidebar({
       >
         <Icon name={item.icon} className={`h-[18px] w-[18px] ${active ? 'text-brand-300' : 'group-hover:text-brand-300'}`} />
         <span>{item.label}</span>
-        {active && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-300 shadow-[0_0_12px_rgba(107,163,190,.95)]" />}
+        {item.view === 'code' && (
+          <span className="ml-auto rounded-md border border-brand-400/25 bg-brand-400/10 px-1.5 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider text-brand-300">
+            Agent
+          </span>
+        )}
+        {active && item.view !== 'code' && (
+          <span className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-300 shadow-[0_0_12px_rgba(107,163,190,.95)]" />
+        )}
       </button>
     );
   };

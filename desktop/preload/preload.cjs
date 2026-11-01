@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('chhotiDon', {
   quit: () => invoke('app:quit'),
   openLogsFolder: () => invoke('app:openLogsFolder'),
   getVersion: () => invoke('app:version'),
+  selectDirectory: () => invoke('dialog:selectDirectory'),
 });
 
 // Readiness-screen bridge (used only while loading.html is shown).

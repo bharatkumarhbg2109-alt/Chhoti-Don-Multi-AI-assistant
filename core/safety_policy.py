@@ -174,3 +174,17 @@ def educational_prompt(message: str) -> str:
         "Emphasise detection, prevention and mitigation where relevant.\n\n"
         f"Question: {message}"
     )
+
+
+class SafetyPolicy:
+    """Object-oriented wrapper for the deterministic safety policy."""
+
+    def __init__(self, config=None):
+        self.config = config
+
+    def evaluate(self, message: str) -> Dict:
+        return evaluate(message)
+
+    def educational_prompt(self, message: str) -> str:
+        return educational_prompt(message)
+

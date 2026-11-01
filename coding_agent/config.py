@@ -97,3 +97,6 @@ DEPLOY_TIMEOUT_S = _env_int("CHHOTI_DON_CODE_DEPLOY_TIMEOUT_S", 600)
 DEPLOY_OUTPUT_CAP = _env_int("CHHOTI_DON_CODE_DEPLOY_OUTPUT_CAP", 16_000)
 # Per-file byte ceiling for the pre-deploy secret scan (skip large/binary files).
 SECRET_SCAN_MAX_FILE_BYTES = _env_int("CHHOTI_DON_CODE_SECRET_SCAN_BYTES", 1_000_000)
+
+# Human-in-the-loop (HITL) confirmation timeout (seconds)
+HITL_CONFIRM_TIMEOUT_S = _env_int("CHHOTI_DON_CODE_CONFIRM_TIMEOUT_S", 60)

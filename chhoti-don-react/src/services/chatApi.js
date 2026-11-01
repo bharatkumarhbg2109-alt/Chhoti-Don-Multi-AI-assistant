@@ -193,3 +193,76 @@ export const getHealingReports = (signal) => request('/self-healing/reports', { 
 
 // ── Logs ──────────────────────────────────────────────────────
 export const getLog = (name, signal) => request(`/logs/${encodeURIComponent(name)}`, { signal });
+
+// ── Workspace & Autonomous Coding Agent ──────────────────────
+export const getWorkspaceStatus = (signal) => request('/workspace', { signal });
+export const grantWorkspace = (path, signal) =>
+  request('/workspace/grant', { method: 'POST', body: { path }, signal, timeout: ACTION_TIMEOUT });
+export const revokeWorkspace = (signal) =>
+  request('/workspace/revoke', { method: 'POST', signal });
+export const getWorkspaceFiles = (path = '.', maxDepth = null, signal) => {
+  const q = new URLSearchParams({ path });
+  if (maxDepth !== null) q.append('max_depth', maxDepth);
+  return request(`/workspace/files?${q.toString()}`, { signal });
+};
+export const getWorkspaceFile = (path, signal) =>
+  request(`/workspace/file?path=${encodeURIComponent(path)}`, { signal });
+export const getWorkspaceServers = (signal) => request('/workspace/servers', { signal });
+export const stopWorkspaceServer = (id, signal) =>
+  request('/workspace/servers/stop', { method: 'POST', body: { id }, signal });
+
+export const startCodingBuild = (task, workspace = null, wait = 0, signal) =>
+  request('/coding/build', { method: 'POST', body: { task, workspace, wait }, signal, timeout: CHAT_TIMEOUT });
+export const pollCodingBuild = (sessionId, wait = 30, signal) =>
+  request(`/coding/build/${encodeURIComponent(sessionId)}?wait=${wait}`, { signal, timeout: CHAT_TIMEOUT });
+export const respondCodingBuild = (sessionId, approve, wait = 30, signal) =>
+  request(`/coding/build/${encodeURIComponent(sessionId)}/respond`, {
+    method: 'POST',
+    body: { approve, wait },
+    signal,
+    timeout: CHAT_TIMEOUT,
+  });
+export const abortCodingBuild = (sessionId, signal) =>
+  request(`/coding/build/${encodeURIComponent(sessionId)}/abort`, { method: 'POST', signal });
+
+export const streamCodingBuild = (sessionId, { onEvent, onDone, onError } = {}) => {
+  const url = `${API_BASE}/coding/build/${encodeURIComponent(sessionId)}/stream`;
+  const es = new EventSource(url);
+
+  const handlePayload = (dataStr) => {
+    try {
+      const payload = typeof dataStr === 'string' ? JSON.parse(dataStr) : dataStr;
+      if (onEvent) onEvent(payload);
+      const ev = payload?.event || payload?.status;
+      if (ev === 'done' || ev === 'error' || ev === 'aborted') {
+        es.close();
+        if (onDone) onDone(payload);
+      }
+    } catch (err) {
+      console.error('[streamCodingBuild] parse error:', err);
+    }
+  };
+
+  const eventTypes = [
+    'session_start', 'planning', 'plan', 'plan_failed', 'plan_rejected', 'plan_approved',
+    'pending_plan', 'plan_response', 'step_start', 'action_start', 'action_complete',
+    'diff', 'pending_confirmation', 'confirmation_response', 'finish', 'done', 'error', 'aborted'
+  ];
+
+  eventTypes.forEach((type) => {
+    es.addEventListener(type, (e) => handlePayload(e.data));
+  });
+
+  es.onmessage = (e) => handlePayload(e.data);
+
+  es.onerror = (err) => {
+    console.warn('[streamCodingBuild] EventSource error or disconnect:', err);
+    es.close();
+    if (onError) onError(err);
+  };
+
+  return () => {
+    es.close();
+  };
+};
+

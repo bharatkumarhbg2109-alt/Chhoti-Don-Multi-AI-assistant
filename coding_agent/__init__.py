@@ -15,7 +15,7 @@ confirmation is made testable via coding_agent.hitl's injectable approver.
 """
 
 from .sandbox import SandboxViolation, WorkspaceSandbox
-from . import hitl, shell, server, deploy
+from . import hitl, shell, server, deploy, interactive
 from .guarded import (
     fs_list_dir, fs_read_file, fs_search,
     fs_write_file, fs_create_file, fs_edit_file, fs_make_dir, fs_delete_file,
@@ -27,7 +27,7 @@ from .guarded import (
 from .agent import CodingAgent, run_build, is_build_request, AGENT_SYSTEM_PROMPT
 
 __all__ = [
-    "SandboxViolation", "WorkspaceSandbox", "hitl", "shell", "server", "deploy",
+    "SandboxViolation", "WorkspaceSandbox", "hitl", "shell", "server", "deploy", "interactive",
     # read-only (LOW)
     "fs_list_dir", "fs_read_file", "fs_search",
     # writes (MEDIUM/HIGH, confirmed)

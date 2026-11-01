@@ -12,6 +12,9 @@ import time
 # Execution time limit (seconds)
 TIMEOUT = 15
 
+# Safe isolated temporary execution directory
+EXEC_TEMP_DIR = tempfile.mkdtemp(prefix="chhoti_exec_")
+
 SUPPORTED_EXEC_LANGUAGES = ["python", "javascript", "cpp", "c", "bash", "sql"]
 
 
@@ -31,7 +34,9 @@ def execute_code(input_data: dict) -> dict:
     if not code:
         return {
             "status": "error",
+            "success": False,
             "message": "No code provided to execute.",
+            "error": "No code provided to execute.",
             "output": None,
             "stderr": None
         }
@@ -39,7 +44,9 @@ def execute_code(input_data: dict) -> dict:
     if language not in SUPPORTED_EXEC_LANGUAGES:
         return {
             "status": "error",
+            "success": False,
             "message": f"Language '{language}' execution not supported. Supported: {SUPPORTED_EXEC_LANGUAGES}",
+            "error": f"Language '{language}' execution not supported.",
             "output": None
         }
 
@@ -66,8 +73,10 @@ def execute_code(input_data: dict) -> dict:
 # 🐍 Python Executor
 # ==================================================
 def _execute_python(code: str, stdin_input: str = "") -> dict:
+    tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+        os.makedirs(EXEC_TEMP_DIR, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', dir=EXEC_TEMP_DIR, delete=False) as f:
             f.write(code)
             tmp_path = f.name
 
@@ -76,31 +85,40 @@ def _execute_python(code: str, stdin_input: str = "") -> dict:
             input=stdin_input,
             capture_output=True,
             text=True,
-            timeout=TIMEOUT
+            timeout=TIMEOUT,
+            cwd=EXEC_TEMP_DIR
         )
-        os.unlink(tmp_path)
-
         return _build_result(result)
     except subprocess.TimeoutExpired:
         return _timeout_result()
     except Exception as e:
         return _error_result(str(e))
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 # ==================================================
 # 🌐 JavaScript Executor (Node.js)
 # ==================================================
 def _execute_javascript(code: str, stdin_input: str = "") -> dict:
+    tmp_path = None
     try:
         node_path = _find_executable(["node", "nodejs"])
         if not node_path:
             return {
                 "status": "error",
+                "success": False,
                 "message": "Node.js not found. Please install Node.js to run JavaScript.",
+                "error": "Node.js not found.",
                 "output": None
             }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.js', delete=False) as f:
+        os.makedirs(EXEC_TEMP_DIR, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.js', dir=EXEC_TEMP_DIR, delete=False) as f:
             f.write(code)
             tmp_path = f.name
 
@@ -109,14 +127,20 @@ def _execute_javascript(code: str, stdin_input: str = "") -> dict:
             input=stdin_input,
             capture_output=True,
             text=True,
-            timeout=TIMEOUT
+            timeout=TIMEOUT,
+            cwd=EXEC_TEMP_DIR
         )
-        os.unlink(tmp_path)
         return _build_result(result)
     except subprocess.TimeoutExpired:
         return _timeout_result()
     except Exception as e:
         return _error_result(str(e))
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 # ==================================================
@@ -134,37 +158,45 @@ def _execute_c(code: str, stdin_input: str = "") -> dict:
 
 
 def _compile_and_run(code: str, stdin_input: str, suffix: str, compiler: str) -> dict:
+    src_path = None
+    out_path = None
     try:
         compiler_path = _find_executable([compiler])
         if not compiler_path:
             return {
                 "status": "error",
+                "success": False,
                 "message": f"{compiler} not found. Please install GCC/G++ to compile {suffix} files.",
+                "error": f"{compiler} not found.",
                 "output": None
             }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, delete=False) as f:
+        os.makedirs(EXEC_TEMP_DIR, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode='w', suffix=suffix, dir=EXEC_TEMP_DIR, delete=False) as f:
             f.write(code)
             src_path = f.name
 
-        out_path = src_path.replace(suffix, "")
+        out_path = src_path.replace(suffix, ".exe" if os.name == "nt" else ".out")
 
         # Compile
         compile_result = subprocess.run(
             [compiler_path, src_path, "-o", out_path],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=TIMEOUT,
+            cwd=EXEC_TEMP_DIR
         )
 
         if compile_result.returncode != 0:
-            os.unlink(src_path)
             return {
                 "status": "error",
+                "success": False,
                 "message": "Compilation failed",
+                "error": "Compilation failed",
                 "output": None,
                 "stderr": compile_result.stderr,
-                "compile_errors": compile_result.stderr
+                "compile_errors": compile_result.stderr,
+                "return_code": compile_result.returncode
             }
 
         # Run
@@ -173,13 +205,9 @@ def _compile_and_run(code: str, stdin_input: str, suffix: str, compiler: str) ->
             input=stdin_input,
             capture_output=True,
             text=True,
-            timeout=TIMEOUT
+            timeout=TIMEOUT,
+            cwd=EXEC_TEMP_DIR
         )
-
-        # Cleanup
-        os.unlink(src_path)
-        if os.path.exists(out_path):
-            os.unlink(out_path)
 
         return _build_result(run_result)
 
@@ -187,12 +215,24 @@ def _compile_and_run(code: str, stdin_input: str, suffix: str, compiler: str) ->
         return _timeout_result()
     except Exception as e:
         return _error_result(str(e))
+    finally:
+        if src_path and os.path.exists(src_path):
+            try:
+                os.unlink(src_path)
+            except Exception:
+                pass
+        if out_path and os.path.exists(out_path):
+            try:
+                os.unlink(out_path)
+            except Exception:
+                pass
 
 
 # ==================================================
 # 🐚 Bash Executor (Windows + Linux compatible)
 # ==================================================
 def _execute_bash(code: str, stdin_input: str = "") -> dict:
+    tmp_path = None
     try:
         bash_path = _find_bash_windows() or _find_executable(["bash", "sh"])
 
@@ -200,7 +240,8 @@ def _execute_bash(code: str, stdin_input: str = "") -> dict:
             # Fallback: PowerShell pe convert karke chalao
             return _execute_bash_via_powershell(code, stdin_input)
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False, newline='\n') as f:
+        os.makedirs(EXEC_TEMP_DIR, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', dir=EXEC_TEMP_DIR, delete=False, newline='\n') as f:
             f.write(code)
             tmp_path = f.name
 
@@ -214,15 +255,21 @@ def _execute_bash(code: str, stdin_input: str = "") -> dict:
             input=stdin_input,
             capture_output=True,
             text=True,
-            timeout=TIMEOUT
+            timeout=TIMEOUT,
+            cwd=EXEC_TEMP_DIR
         )
-        os.unlink(tmp_path)
         return _build_result(result)
 
     except subprocess.TimeoutExpired:
         return _timeout_result()
     except Exception as e:
         return _error_result(str(e))
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
 
 def _find_bash_windows() -> str | None:
@@ -252,7 +299,9 @@ def _execute_bash_via_powershell(code: str, stdin_input: str = "") -> dict:
         if not ps_path:
             return {
                 "status": "error",
+                "success": False,
                 "message": "Bash aur PowerShell dono nahi mile. Git Bash install karo: https://git-scm.com",
+                "error": "Bash aur PowerShell dono nahi mile.",
                 "output": None
             }
 
@@ -264,12 +313,14 @@ def _execute_bash_via_powershell(code: str, stdin_input: str = "") -> dict:
         ps_code = ps_code.replace("#!/bin/bash", "")
         ps_code = ps_code.replace("#!/bin/sh", "")
 
+        os.makedirs(EXEC_TEMP_DIR, exist_ok=True)
         result = subprocess.run(
             [ps_path, "-Command", ps_code],
             input=stdin_input,
             capture_output=True,
             text=True,
-            timeout=TIMEOUT
+            timeout=TIMEOUT,
+            cwd=EXEC_TEMP_DIR
         )
         r = _build_result(result)
         r["note"] = "⚠️ Bash nahi mila — PowerShell fallback use hua. Git Bash install karo for full support."
@@ -310,6 +361,7 @@ def _execute_sql(code: str, stdin_input: str = "") -> dict:
 
         return {
             "status": "success",
+            "success": True,
             "output": output,
             "stderr": None,
             "return_code": 0
@@ -336,7 +388,8 @@ def _which(name: str) -> str | None:
     try:
         result = subprocess.run(
             ["where" if os.name == "nt" else "which", name],
-            capture_output=True, text=True
+            capture_output=True, text=True,
+            timeout=5
         )
         if result.returncode == 0:
             return result.stdout.strip().splitlines()[0]
@@ -349,6 +402,7 @@ def _build_result(result) -> dict:
     success = result.returncode == 0
     return {
         "status": "success" if success else "error",
+        "success": success,
         "output": result.stdout.strip() if result.stdout else "[No output]",
         "stderr": result.stderr.strip() if result.stderr else None,
         "return_code": result.returncode
@@ -358,16 +412,22 @@ def _build_result(result) -> dict:
 def _timeout_result() -> dict:
     return {
         "status": "error",
+        "success": False,
         "message": f"Execution timed out after {TIMEOUT} seconds.",
+        "error": f"Execution timed out after {TIMEOUT} seconds.",
         "output": None,
-        "stderr": None
+        "stderr": None,
+        "return_code": -1
     }
 
 
 def _error_result(msg: str) -> dict:
     return {
         "status": "error",
+        "success": False,
         "message": msg,
+        "error": msg,
         "output": None,
-        "stderr": None
+        "stderr": None,
+        "return_code": -1
     }

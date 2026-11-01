@@ -32,6 +32,7 @@ const paths = {
   database: <path d="M12 3c4.4 0 8 1.3 8 3s-3.6 3-8 3-8-1.3-8-3 3.6-3 8-3Zm8 3v6c0 1.7-3.6 3-8 3s-8-1.3-8-3V6m16 6v6c0 1.7-3.6 3-8 3s-8-1.3-8-3v-6" />,
   desktop: <path d="M4 4h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm4 16h8m-4-4v4" />,
   refresh: <path d="M4 4v5h5M20 20v-5h-5M20 9a8 8 0 0 0-14.9-2M4 15a8 8 0 0 0 14.9 2" />,
+  code: <path d="m16 18 6-6-6-6M8 6l-6 6 6 6" />,
 };
 
 export default function Icon({ name, className = 'h-5 w-5', strokeWidth = 1.8 }) {

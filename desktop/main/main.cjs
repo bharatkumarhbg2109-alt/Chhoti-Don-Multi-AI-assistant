@@ -324,6 +324,15 @@ function registerIpc() {
   });
   ipcMain.handle('app:openLogsFolder', () => shell.openPath(cfg.runtimeDir()));
   ipcMain.handle('app:version', () => app.getVersion());
+  ipcMain.handle('dialog:selectDirectory', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+    const res = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Workspace Folder for CHHOTI DON',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (res.canceled || !res.filePaths || !res.filePaths.length) return null;
+    return res.filePaths[0];
+  });
 
   ipcMain.on('startup:retry', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {

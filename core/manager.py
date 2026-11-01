@@ -17,6 +17,8 @@ from cyber_engine.guardian.operator_guard import OperatorGuard
 from core.task_classifier import detect_task
 from core.brain_router import route_task, detect_intent, route_coding_tool
 from core.local_model_engine import execute
+from core.config import Config
+from core.semantic_memory import SemanticMemory
 
 
 def _should_run_rag(task: str) -> bool:
@@ -70,12 +72,14 @@ def _as_text(value) -> str:
 class ManagerAgent:
 
     def __init__(self):
+        self.config = Config()
         self.agents = {}
         self.brain = Brain()
         self.memory = Memory()
         self.tool_registry = ToolRegistry(brain=self.brain)  # Brain inject karo
         self.guardian = OperatorGuard()
         self.session_log = []
+        self.semantic_memory = SemanticMemory(self.config)
 
     # --------------------------------------------------
     # 🔥 LEVEL 7 — HYBRID BRAIN MODE
@@ -499,6 +503,14 @@ class ManagerAgent:
 
         user_lang = detect_language(task)
 
+        # Semantic memory recall (long-term context)
+        memory_context = ""
+        try:
+            if hasattr(self, "semantic_memory") and self.semantic_memory.enabled:
+                memory_context = self.semantic_memory.recall(task)
+        except Exception:
+            memory_context = ""
+
         # Phase-4 opt-in: an EXPLICIT shopping request ("Flipkart pe mouse dhundo")
         # runs the read-only search+present shopping flow. Phase-2: "open the browser
         # and research X" runs the read-only research agent. Both triggers are
@@ -618,17 +630,30 @@ class ManagerAgent:
         else:
             _context = ""
 
+        full_context = ""
+        if memory_context:
+            full_context += memory_context + "\n\n"
         if _context:
+            full_context += _context
+
+        if full_context:
             from core.brain_registry import get_system_prompt
-            grounded_system = build_grounded_system(get_system_prompt("default"), _context)
+            grounded_system = build_grounded_system(get_system_prompt("default"), full_context.strip())
             response = self.brain.think(task, system_override=grounded_system)
         else:
             response = self.brain.think(task)
 
+        # Store important conversation turns in semantic memory
+        try:
+            if hasattr(self, "semantic_memory") and self.semantic_memory.enabled:
+                self.semantic_memory.store(task, str(response))
+        except Exception:
+            pass
+
         result = {
             "agent": "Brain",
             "language": user_lang,
-            "thinking": "LLM reasoning" + (" + ai_knowledge RAG" if rag_sources else ""),
+            "thinking": "LLM reasoning" + (" + ai_knowledge RAG" if rag_sources else "") + (" + semantic memory" if memory_context else ""),
             "output": response,
         }
         if rag_sources:
@@ -740,6 +765,14 @@ class ManagerAgent:
         the non-streaming brain_task instead. Kept separate so brain_task stays
         untouched for every existing caller/test.
         """
+        # Semantic memory recall (long-term context)
+        memory_context = ""
+        try:
+            if hasattr(self, "semantic_memory") and self.semantic_memory.enabled:
+                memory_context = self.semantic_memory.recall(task)
+        except Exception:
+            memory_context = ""
+
         # RAG grounding (same logic + same intent gate as brain_task), resolved
         # up-front so no token is streamed before the grounding decision is made.
         grounded_system = None
@@ -749,14 +782,36 @@ class ManagerAgent:
                 _context, _sources = retrieve_context(task)
             except Exception:
                 _context = ""
-            if _context:
-                from core.brain_registry import get_system_prompt
-                grounded_system = build_grounded_system(get_system_prompt("default"), _context)
-
-        if grounded_system:
-            yield from self.brain.think_stream(task, system_override=grounded_system)
         else:
-            yield from self.brain.think_stream(task)
+            _context = ""
+
+        full_context = ""
+        if memory_context:
+            full_context += memory_context + "\n\n"
+        if _context:
+            full_context += _context
+
+        if full_context:
+            from core.brain_registry import get_system_prompt
+            grounded_system = build_grounded_system(get_system_prompt("default"), full_context.strip())
+
+        accumulated = []
+        try:
+            if grounded_system:
+                for chunk in self.brain.think_stream(task, system_override=grounded_system):
+                    accumulated.append(chunk)
+                    yield chunk
+            else:
+                for chunk in self.brain.think_stream(task):
+                    accumulated.append(chunk)
+                    yield chunk
+        finally:
+            if accumulated:
+                try:
+                    if hasattr(self, "semantic_memory") and self.semantic_memory.enabled:
+                        self.semantic_memory.store(task, "".join(accumulated))
+                except Exception:
+                    pass
 
     # --------------------------------------------------
     # Autonomous Mode (Preserved + Coding Tools Added)

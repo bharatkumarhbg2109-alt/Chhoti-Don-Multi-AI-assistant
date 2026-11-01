@@ -16,6 +16,7 @@ import WorkspaceView from './components/WorkspaceView';
 import Icon from './components/Icon';
 import useConversations from './hooks/useConversations';
 import { useToast } from './context/ToastContext';
+import { useMode } from './context/ModeContext';
 import { getStatus, sendMessage, resetMemory, isDesktop } from './services/chatApi';
 import { deriveAiStatus } from './services/status';
 
@@ -57,8 +58,9 @@ function App() {
     removeConversation,
   } = useConversations();
   const { notify } = useToast();
+  const { mode, setMode, isCodeMode } = useMode();
 
-  const [view, setView] = useState('assistant');
+  const [view, setView] = useState(() => (mode === 'code' ? 'code' : 'assistant'));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [message, setMessage] = useState('');
@@ -108,6 +110,14 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    if (isCodeMode && view === 'assistant') {
+      setView('code');
+    } else if (!isCodeMode && (view === 'code' || view === 'workspace')) {
+      setView('assistant');
+    }
+  }, [isCodeMode, view]);
+
+  useEffect(() => {
     const handleShortcut = (event) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       if (event.key.toLowerCase() === 'n') {
@@ -116,8 +126,12 @@ function App() {
       }
       if (event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setView('assistant');
+        handleSelectView('assistant');
         requestAnimationFrame(() => composerRef.current?.focus?.());
+      }
+      if (event.key.toLowerCase() === 'b' || (event.shiftKey && event.key.toLowerCase() === 'c')) {
+        event.preventDefault();
+        handleSelectView('code');
       }
     };
     window.addEventListener('keydown', handleShortcut);
@@ -415,6 +429,11 @@ function App() {
   const handleSelectView = (nextView) => {
     setView(nextView);
     setSidebarOpen(false);
+    if (nextView === 'code' || nextView === 'workspace') {
+      setMode('code');
+    } else if (nextView === 'assistant') {
+      setMode('chat');
+    }
   };
 
   const handlePickPrompt = (idea) => {
@@ -487,6 +506,7 @@ function App() {
           <TopBar
             onOpenSidebar={() => setSidebarOpen(true)}
             currentView={view}
+            onSelectView={handleSelectView}
             aiStatus={aiStatus}
             privateMode={privateMode}
             desktop={isDesktop()}
@@ -505,13 +525,13 @@ function App() {
               ref={attachScroll}
               className="scrollbar-subtle min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-10 pt-6 sm:px-6 lg:px-10"
             >
-              <div className="mx-auto max-w-4xl">
+              <div className={view === 'code' || view === 'workspace' ? 'mx-auto w-full max-w-7xl' : 'mx-auto max-w-4xl'}>
                 {view === 'memory' && <MemoryView onClearMemory={handleClearMemory} />}
-                {view === 'workspace' && <WorkspaceView />}
+                {(view === 'code' || view === 'workspace') && <WorkspaceView />}
                 {view === 'system' && <SystemStatusView status={status} backendOnline={backendOnline} onRefreshStatus={() => loadStatus()} />}
                 {view === 'cyber' && <CyberView />}
                 {view === 'healing' && <HealingView />}
-                {view === 'assistant' &&
+                {view === 'assistant' && !isCodeMode &&
                   (!hasConversation ? (
                     <div className="mt-6">
                       {loadingMessages ? (
@@ -556,7 +576,7 @@ function App() {
               </div>
             </div>
 
-            {view === 'assistant' && showJump && (
+            {view === 'assistant' && !isCodeMode && showJump && (
               <button
                 type="button"
                 onClick={() => scrollToBottom(true)}
@@ -568,7 +588,7 @@ function App() {
               </button>
             )}
 
-            {view === 'assistant' && (
+            {view === 'assistant' && !isCodeMode && (
               <div className="relative shrink-0 px-3 pb-3 sm:px-6 sm:pb-5 lg:px-10">
                 <div className="pointer-events-none absolute inset-x-0 -top-16 h-20 bg-gradient-to-t from-[#031716]/85 to-transparent" />
                 <ChatComposer

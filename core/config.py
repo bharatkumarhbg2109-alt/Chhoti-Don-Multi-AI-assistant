@@ -46,6 +46,10 @@ class Config:
     MAX_MEMORY = 20
     MEMORY_FILE = "core/memory_state.json"
     LEARNING_FILE = "core/learning_state.json"
+    CHROMA_PATH = os.getenv(
+        "CHROMA_PATH",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "knowledge_pipeline", "chroma_db")
+    )
 
     # Ollama
     OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")

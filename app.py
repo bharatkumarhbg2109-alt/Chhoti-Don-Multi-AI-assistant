@@ -157,7 +157,7 @@ def _chat_error(req_id, code, message, http_status, retryable):
 # tool_ids whose routing does NOT resolve to a plain, token-streamable LLM
 # generation (they produce code, tool output, or run the autonomous planner).
 _NON_STREAM_TOOL_IDS = {
-    "coder", "reveng", "strings", "autofix",
+    "coder", "reveng", "strings", "autofix", "build",
     "recon", "malware", "pentest", "webscan", "exploit", "mitre", "ioc", "heatmap",
     "search",  # "search" routes into the web_search tool inside brain_task
 }
@@ -173,6 +173,12 @@ def _is_stream_chat_path(message, tool_id):
         return False
     if _IMAGE_PATH_RE.search(message):
         return False
+    try:
+        from coding_agent.agent import is_build_request
+        if is_build_request(message):
+            return False
+    except Exception:
+        pass
     if detect_intent(message) in ("coding", "debug") or detect_task(message) == "coding":
         return False
     try:
@@ -390,6 +396,13 @@ def _route_to_tool(message: str, tool_id: str, image: str = None) -> dict:
 
     if tool_id in ["coder", "reveng", "strings", "autofix"]:
         return chhoti_don.coding_task(message)
+    elif tool_id == "build":
+        from coding_agent import guarded
+        if guarded.active_workspace() is None:
+            return {"status": "error", "output": "⚠️ No active workspace granted. Please grant a workspace folder in the Workspace tab before building."}
+        from coding_agent.agent import run_build
+        res = run_build(message, think_fn=_coding_think_fn(), plan_approver=lambda plan: True)
+        return {"status": res.get("status", "success"), "output": res.get("summary", ""), "build_result": res}
     elif tool_id in ["recon", "malware", "pentest", "webscan",
                      "exploit", "mitre", "ioc", "heatmap"]:
         return chhoti_don.autonomous_llm_task(message)
@@ -400,6 +413,15 @@ def _route_to_tool(message: str, tool_id: str, image: str = None) -> dict:
     else:
         intent = detect_intent(message)
         task   = detect_task(message)
+        try:
+            from coding_agent.agent import is_build_request
+            from coding_agent import guarded
+            if is_build_request(message) and guarded.active_workspace() is not None:
+                from coding_agent.agent import run_build
+                res = run_build(message, think_fn=_coding_think_fn(), plan_approver=lambda plan: True)
+                return {"status": res.get("status", "success"), "output": res.get("summary", ""), "build_result": res}
+        except Exception:
+            pass
         if intent in ["coding", "debug"] or task == "coding":
             return chhoti_don.coding_task(message)
         else:
@@ -413,6 +435,16 @@ def _route_to_tool(message: str, tool_id: str, image: str = None) -> dict:
 def _extract_response(result) -> str:
     if not isinstance(result, dict):
         return str(result)
+    if "build_result" in result and isinstance(result["build_result"], dict):
+        b = result["build_result"]
+        parts = [f"🛠️ **Autonomous Build ({b.get('stopped', 'complete')}):**\n{b.get('summary', '')}"]
+        if b.get("executed"):
+            files = ", ".join(f"`{f.get('path')}`" for f in b["executed"])
+            parts.append(f"📁 **Files modified:** {files}")
+        if b.get("servers"):
+            srvs = ", ".join(f"[{s.get('command')}]({s.get('url', '#')})" for s in b["servers"])
+            parts.append(f"🚀 **Running servers:** {srvs}")
+        return "\n\n".join(parts)
     output = result.get("output", "")
     if isinstance(output, dict):
         # ── Browser tools (web_search / open_page) ──────────────────
@@ -532,6 +564,258 @@ def browser_research_respond():
     except Exception:
         log.exception("browser research respond failed")
         return jsonify({"status": "error", "message": "Interactive research resume failed."}), 500
+
+
+# ── Workspace & Autonomous Coding Agent ──────────────────────
+def _coding_think_fn():
+    def _think(prompt):
+        return chhoti_don.brain.think_fast(
+            prompt,
+            brain_type="coding",
+            num_predict=4096,
+            system_prompt="You are Chhoti Don's autonomous coding builder. Always respond with STRICT JSON and nothing else."
+        )
+    return _think
+
+
+@app.route("/api/workspace", methods=["GET"])
+def workspace_status():
+    try:
+        from coding_agent import guarded, server
+        sb = guarded.active_workspace()
+        if sb is None:
+            return jsonify({
+                "status": "success",
+                "active": False,
+                "root": None,
+                "servers": server.list_running(),
+            })
+        files_res = guarded.fs_list_dir({"path": ".", "max_depth": 2})
+        entries = files_res.get("entries", files_res.get("items", []))
+        return jsonify({
+            "status": "success",
+            "active": True,
+            "root": sb.root,
+            "files": entries,
+            "entries": entries,
+            "items": entries,
+            "servers": server.list_running(),
+        })
+    except Exception as exc:
+        log.exception("workspace status failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/workspace/grant", methods=["POST"])
+def workspace_grant():
+    try:
+        data = request.get_json(silent=True) or {}
+        path = str(data.get("path", "")).strip()
+        if not path:
+            return jsonify({"status": "error", "message": "Path is required."}), 400
+        from coding_agent import guarded
+        res = guarded.grant_workspace(path)
+        if res.get("status") != "success":
+            return jsonify(res), 400
+        return jsonify(res)
+    except Exception as exc:
+        log.exception("workspace grant failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/workspace/revoke", methods=["POST"])
+def workspace_revoke():
+    try:
+        from coding_agent import guarded
+        guarded.revoke_workspace()
+        return jsonify({"status": "success", "active": False})
+    except Exception as exc:
+        log.exception("workspace revoke failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/workspace/files", methods=["GET"])
+def workspace_files():
+    try:
+        from coding_agent import guarded
+        if guarded.active_workspace() is None:
+            return jsonify({"status": "error", "message": "No active workspace granted."}), 400
+        path = request.args.get("path", ".")
+        max_depth = request.args.get("max_depth")
+        res = guarded.fs_list_dir({
+            "path": path,
+            "max_depth": int(max_depth) if max_depth is not None else None,
+        })
+        if isinstance(res, dict) and "entries" in res:
+            res["items"] = res["entries"]
+        return jsonify(res)
+    except Exception as exc:
+        log.exception("workspace files failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/workspace/file", methods=["GET"])
+def workspace_file_read():
+    try:
+        from coding_agent import guarded
+        if guarded.active_workspace() is None:
+            return jsonify({"status": "error", "message": "No active workspace granted."}), 400
+        path = request.args.get("path", "")
+        if not path:
+            return jsonify({"status": "error", "message": "Path is required."}), 400
+        max_bytes = request.args.get("max_bytes")
+        res = guarded.fs_read_file({
+            "path": path,
+            "max_bytes": int(max_bytes) if max_bytes is not None else None,
+        })
+        return jsonify(res)
+    except Exception as exc:
+        log.exception("workspace file read failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/workspace/servers", methods=["GET"])
+def workspace_servers():
+    try:
+        from coding_agent import server
+        return jsonify({"status": "success", "servers": server.list_running()})
+    except Exception as exc:
+        log.exception("workspace servers failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/workspace/servers/stop", methods=["POST"])
+def workspace_server_stop():
+    try:
+        data = request.get_json(silent=True) or {}
+        server_id = str(data.get("id") or data.get("server_id") or "").strip()
+        if not server_id:
+            return jsonify({"status": "error", "message": "server_id is required."}), 400
+        from coding_agent import server
+        res = server.stop(server_id)
+        return jsonify(res)
+    except Exception as exc:
+        log.exception("workspace server stop failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/coding/build", methods=["POST"])
+def coding_build_start():
+    try:
+        from coding_agent import interactive, guarded
+        data = request.get_json(silent=True) or {}
+        task = str(data.get("task") or data.get("prompt") or data.get("message") or "").strip()
+        if not task:
+            return jsonify({"status": "error", "message": "A build task description is required."}), 400
+
+        workspace = data.get("workspace")
+        if workspace:
+            grant = guarded.grant_workspace(workspace)
+            if grant.get("status") != "success":
+                return jsonify(grant), 400
+
+        if guarded.active_workspace() is None:
+            return jsonify({"status": "error", "message": "No active workspace granted. Grant a workspace first."}), 400
+
+        session_id = str(data.get("session_id") or uuid.uuid4().hex[:12])
+        max_steps = data.get("max_steps")
+        wait = float(data.get("wait", 30))
+
+        think = _coding_think_fn()
+        interactive.start_session(
+            task=task,
+            think_fn=think,
+            session_id=session_id,
+            max_steps=int(max_steps) if max_steps is not None else None,
+        )
+        checkpoint = interactive.poll_session(session_id, wait=wait)
+        return jsonify({"session_id": session_id, **checkpoint})
+    except Exception as exc:
+        log.exception("coding build start failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/coding/build/<session_id>/stream", methods=["GET"])
+def coding_build_stream(session_id):
+    try:
+        from coding_agent import interactive
+        session = interactive.get_session(session_id)
+        if not session:
+            return jsonify({"status": "error", "marker": "SESSION_NOT_FOUND", "message": f"Session '{session_id}' not found."}), 404
+
+        last_id = 0
+        raw_last = request.headers.get("Last-Event-ID") or request.args.get("last_event_id") or request.args.get("after")
+        if raw_last is not None:
+            try:
+                last_id = int(raw_last)
+            except (ValueError, TypeError):
+                last_id = 0
+
+        heartbeat = float(request.args.get("heartbeat", 15.0))
+        raw_hb = request.args.get("max_heartbeats")
+        max_hb = int(raw_hb) if raw_hb is not None else None
+
+        @stream_with_context
+        def _generate():
+            for chunk in session.stream_events(last_event_id=last_id, heartbeat_interval=heartbeat, max_heartbeats=max_hb):
+                yield chunk
+
+        return Response(
+            _generate(),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+    except Exception as exc:
+        log.exception("coding build stream failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/coding/build/<session_id>", methods=["GET"])
+def coding_build_status(session_id):
+    try:
+        accept = request.headers.get("Accept", "")
+        if "text/event-stream" in accept or request.args.get("stream") == "true":
+            return coding_build_stream(session_id)
+        from coding_agent import interactive
+        wait = float(request.args.get("wait", 0))
+        checkpoint = interactive.poll_session(session_id, wait=wait)
+        return jsonify({"session_id": session_id, **checkpoint})
+    except Exception as exc:
+        log.exception("coding build poll failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/coding/build/<session_id>/respond", methods=["POST"])
+def coding_build_respond(session_id):
+    try:
+        from coding_agent import interactive
+        data = request.get_json(silent=True) or {}
+        raw = data.get("approve", data.get("decision", data.get("answer")))
+        if isinstance(raw, bool):
+            approve = raw
+        else:
+            approve = str(raw or "").strip().lower() in ("yes", "y", "approve", "approved", "ok", "true", "1")
+        wait = float(data.get("wait", 30))
+        checkpoint = interactive.respond_session(session_id, approve=approve, wait=wait)
+        return jsonify({"session_id": session_id, "approved": approve, **checkpoint})
+    except Exception as exc:
+        log.exception("coding build respond failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+
+@app.route("/api/coding/build/<session_id>/abort", methods=["POST"])
+def coding_build_abort(session_id):
+    try:
+        from coding_agent import interactive
+        snapshot = interactive.abort_session(session_id)
+        return jsonify({"session_id": session_id, **snapshot})
+    except Exception as exc:
+        log.exception("coding build abort failed")
+        return jsonify({"status": "error", "message": str(exc)}), 500
 
 
 # ── Status ────────────────────────────────────────────────────

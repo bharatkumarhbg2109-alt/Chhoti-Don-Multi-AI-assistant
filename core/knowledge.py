@@ -110,3 +110,21 @@ def build_grounded_system(base_system: str, context: str) -> str:
           "own knowledge.\n\n"
           f"CONTEXT:\n{context}"
     )
+
+
+class KnowledgeBridge:
+    """Object-oriented adapter for RAG knowledge retrieval."""
+
+    def __init__(self, config=None):
+        self.config = config
+
+    def search(self, query: str, top_k: int = 3) -> list:
+        """Search the ChromaDB knowledge store and return matched chunks/sources."""
+        context, sources = retrieve_context(query, top_k=top_k)
+        if sources:
+            return sources
+        return [context] if context else []
+
+    def retrieve_context(self, query: str, top_k: int | None = None, max_distance: float | None = None):
+        return retrieve_context(query, top_k=top_k, max_distance=max_distance)
+

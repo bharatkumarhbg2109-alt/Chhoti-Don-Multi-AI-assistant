@@ -361,8 +361,10 @@ class CodingAgent:
                  max_obs: int = AGENT_MAX_OBS, max_parse_retries: int = AGENT_MAX_PARSE_RETRIES,
                  max_repeat: int = AGENT_MAX_REPEAT, read_max_lines: int = AGENT_READ_MAX_LINES,
                  summary_max_lines: int = AGENT_SUMMARY_MAX_LINES,
-                 heal_budget: int = AGENT_HEAL_BUDGET):
+                 heal_budget: int = AGENT_HEAL_BUDGET,
+                 on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None):
         self.think_fn = think_fn
+        self.on_event = on_event
         # Fail-safe defaults: no plan approval -> reject (write nothing); deletes and
         # HIGH/out-of-plan commands deny unless an explicit approver is supplied.
         self.plan_approver = plan_approver or (lambda plan: False)
@@ -381,6 +383,13 @@ class CodingAgent:
         self.heal_budget = max(1, int(heal_budget))
         self._approved_paths: set = set()
         self._approved_commands: set = set()
+
+    def _emit_event(self, event: str, data: Optional[Dict[str, Any]] = None) -> None:
+        if self.on_event:
+            try:
+                self.on_event(event, data or {})
+            except Exception:
+                logger.exception("[coding-agent] on_event callback failed for event=%s", event)
 
     # ---- planning ----
     def _plan_prompt(self, task: str, corrective: Optional[str] = None) -> str:
@@ -517,12 +526,15 @@ class CodingAgent:
     def run(self, task: str) -> Dict[str, Any]:
         t0 = time.perf_counter()
         trace: List[Dict[str, Any]] = []
+        self._emit_event("planning", {"task": task})
 
         # 1) PLAN
         plan = self._plan(task, trace)
         if plan is None:
+            self._emit_event("plan_failed", {"task": task, "error": "plan_parse_error"})
             return self._result(task, "Could not produce a valid build plan.",
                                  trace, 0, "plan_parse_error", t0, None, [])
+        self._emit_event("plan", {"task": task, "plan": plan, "actions": len(plan)})
 
         # 2) APPROVAL (once)
         try:
@@ -532,8 +544,10 @@ class CodingAgent:
             approved = False
         if not approved:
             logger.info("[coding-agent] plan rejected; nothing written")
+            self._emit_event("plan_rejected", {"task": task, "plan": plan})
             return self._result(task, "Plan rejected; nothing was written.",
                                  trace, 0, "rejected", t0, plan, [])
+        self._emit_event("plan_approved", {"task": task, "plan": plan})
 
         # 3) EXECUTE under the session approver (batched in-scope MEDIUM writes /
         #    in-plan MEDIUM commands; HIGH + out-of-scope still confirm/deny).
@@ -565,6 +579,7 @@ class CodingAgent:
         _nudged_step: Optional[int] = None
 
         for step in range(1, self.max_steps + 1):
+            self._emit_event("step_start", {"step": step, "max_steps": self.max_steps})
             action = None
             corrective = None
             for _attempt in range(2):  # initial + one corrective nudge
@@ -589,9 +604,11 @@ class CodingAgent:
                 continue
 
             tool, args = action["tool"], action["args"]
+            self._emit_event("action_start", {"step": step, "tool": tool, "args": args})
 
             if tool == "finish":
                 summary = str(args.get("summary", args.get("answer", ""))).strip() or "(done)"
+                self._emit_event("finish", {"step": step, "summary": summary})
                 trace.append({"step": step, "action": "finish"})
                 return self._result(task, summary, trace, step, "finish", t0, plan, executed, commands)
 
@@ -625,12 +642,29 @@ class CodingAgent:
             logger.info("[coding-agent] step=%d tool=%s gate=%s arg=%s",
                         step, tool, gate, _arg_label(args))
             history.append((action, obs))
+            diff = result.get("diff") if isinstance(result, dict) else None
+            self._emit_event("action_complete", {
+                "step": step,
+                "tool": tool,
+                "args": args,
+                "gate": gate,
+                "observation": obs,
+                "diff": diff,
+                "status": result.get("status") if isinstance(result, dict) else None,
+            })
+            if diff:
+                self._emit_event("diff", {
+                    "step": step,
+                    "tool": tool,
+                    "path": args.get("path") or (result.get("path") if isinstance(result, dict) else None),
+                    "diff": diff,
+                })
             if isinstance(result, dict) and result.get("status") == "success" and tool in WRITE_TOOLS:
                 executed.append({"tool": tool, "path": result.get("path")})
             if tool == "sh_run" and isinstance(result, dict):
                 commands.append({"command": result.get("command"),
                                  "exit_code": result.get("exit_code"), "gate": gate})
-                # TRIGGER A: implicit verify — sh_run of a verify command exits 0
+                # TRIGGER A: implicit verify â€” sh_run of a verify command exits 0
                 # => task likely done; break without calling the model again.
                 if (gate == "ALLOW"
                         and result.get("exit_code") == 0
@@ -646,7 +680,7 @@ class CodingAgent:
                 self._run_deploys.append({"platform": result.get("platform"),
                                           "prod": result.get("prod"), "url": result.get("url"),
                                           "ok": result.get("ok")})
-            # TRIGGER B: implicit repeat — after a nudge, if the model repeats the
+            # TRIGGER B: implicit repeat â€” after a nudge, if the model repeats the
             # same action (success or failure), it is stuck. Fire implicit_repeat to stop cleanly.
             # Terminate cleanly rather than looping or breaking with no_progress.
             if (_nudged_step is not None
@@ -697,7 +731,7 @@ class CodingAgent:
         servers = [{"id": s["id"], "command": s["command"],
                     "url": s.get("detected_url"), "stop_with": f"serve_stop id={s['id']}"}
                    for s in server.list_running()]
-        return {
+        res = {
             "status": status,
             "task": task,
             "summary": summary,
@@ -711,6 +745,8 @@ class CodingAgent:
             "trace": trace,
             "total_ms": round((time.perf_counter() - t0) * 1000, 1),
         }
+        self._emit_event("done", {"result": res, "status": status, "stopped": stopped, "summary": summary})
+        return res
 
 
 def run_build(task: str, think_fn: Callable[[str], str],

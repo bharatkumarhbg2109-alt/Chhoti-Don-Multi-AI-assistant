@@ -1,10 +1,12 @@
 import React from 'react';
 import Icon from './Icon';
+import { useMode } from '../context/ModeContext';
 import { TONE_DOT } from '../services/status';
 
 const VIEW_META = {
   assistant: { title: 'CHHOTI DON Assistant', subtitle: 'Personal, context-aware, and ready to help' },
-  workspace: { title: 'Workspace', subtitle: 'Project & file integration — planned' },
+  code: { title: 'Autonomous Coding Agent', subtitle: 'Sandboxed ReAct builder, file explorer & local dev servers' },
+  workspace: { title: 'Coding Agent Workspace', subtitle: 'Sandboxed ReAct builder, file explorer & local dev servers' },
   memory: { title: 'Memory', subtitle: 'Recent context held by the engine' },
   system: { title: 'System Status', subtitle: 'Desktop shell, backend, Ollama, model & database' },
   cyber: { title: 'Cyber Engine', subtitle: 'Read-only defensive posture & safety policy' },
@@ -14,6 +16,7 @@ const VIEW_META = {
 export default function TopBar({
   onOpenSidebar,
   currentView = 'assistant',
+  onSelectView,
   aiStatus,
   privateMode,
   desktop = false,
@@ -22,7 +25,8 @@ export default function TopBar({
   onThemeClick,
   theme = 'dark',
 }) {
-  const meta = VIEW_META[currentView] || VIEW_META.assistant;
+  const { isCodeMode, setMode } = useMode();
+  const meta = VIEW_META[currentView] || (isCodeMode ? VIEW_META.code : VIEW_META.assistant);
   const status = aiStatus || { label: 'Checking…', tone: 'muted' };
 
   return (
@@ -47,6 +51,24 @@ export default function TopBar({
       </div>
 
       <div className="flex items-center gap-2">
+        {/* Mode Switcher */}
+        <button
+          type="button"
+          onClick={() => {
+            const nextMode = isCodeMode ? 'chat' : 'code';
+            setMode(nextMode);
+            onSelectView?.(nextMode === 'code' ? 'code' : 'assistant');
+          }}
+          className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-300/40 ${
+            isCodeMode
+              ? 'border-brand-300/40 bg-brand-400/20 text-brand-100 shadow-[0_0_15px_rgba(107,163,190,0.2)]'
+              : 'border-white/10 bg-white/[0.035] text-slate-400 hover:border-white/20 hover:text-slate-200'
+          }`}
+          title={isCodeMode ? 'Switch to Chat Assistant' : 'Switch to Coding Agent Workspace'}
+        >
+          <Icon name={isCodeMode ? 'code' : 'chat'} className="h-3.5 w-3.5 text-brand-300" />
+          <span className="hidden sm:inline">{isCodeMode ? 'Code Mode' : 'Chat Mode'}</span>
+        </button>
         {desktop && (
           <span
             className="hidden items-center gap-1.5 rounded-full border border-emerald-300/25 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200 md:inline-flex"
