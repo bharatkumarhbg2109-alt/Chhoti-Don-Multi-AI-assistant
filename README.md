@@ -1,5 +1,5 @@
 # Chhoti Don
 
-Multi-language, multi-agent AI system
-focused on software development,
-cybersecurity, and ethical research.
+Multi-language, multi-agent AI system focused on software development, cybersecurity, and ethical research.
+
+GitHub repository: Chhoti-Don-Multi-AI-assistant
